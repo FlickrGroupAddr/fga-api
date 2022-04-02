@@ -13,6 +13,7 @@ logging_level = logging.DEBUG
 logger = logging.getLogger()
 logger.setLevel(logging_level)
 
+ssm = boto3.client('ssm', region_name='us-east-2' )
 
 
 def _valid_app_request( app_request ):
@@ -46,9 +47,32 @@ def _read_event(event):
     return app_requests
 
 
+def _get_flickr_user_creds( user_cognito_id ):
+    user_creds = None
+
+    try:
+        user_creds = json.loads(
+            ssm.get_parameter(Name=f"/flickrgroupaddr/user/{user_cognito_id}/secrets/flickr_oauth_tokens" )['Parameter']['Value'] )
+
+        logger.info( f"Cognito user ID {user_cognito_id} successfully returned flickr creds from Param Store" )
+        logger.debug( json.dumps(user_creds, indent=4, sort_keys=True) )
+
+
+    except:
+        logger.error(f"Exception thrown when trying to pull user creds for cognito user {user_cognito_id}" )
+
+    return user_creds
+
+
 def _process_app_requests( app_requests ):
     for curr_request in app_requests:
         logger.debug( "Processing request:\n" + json.dumps(curr_request, indent=4, sort_keys=True) )
+
+        
+        flickr_creds = _get_flickr_user_creds( curr_request['user_cognito_id'] )
+        if not flickr_creds:
+            logger.warn( f"Could not find flickr creds for Cognito user ID \"{curr_request['user_cognito_id']}\", bailing" )
+            continue
 
 
 def attempt_flickr_group_add(event, context):
@@ -61,5 +85,5 @@ def attempt_flickr_group_add(event, context):
         logger.debug( json.dumps( app_requests, indent=4, sort_keys=True) )
 
         _process_app_requests( app_requests )
-    except:
-        logger.warn("Unhandled exception thrown, bailing")
+    except Exception as e:
+        logger.error("Unhandled exception caught at top level, bailing: " + str(e) )
