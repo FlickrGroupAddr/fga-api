@@ -12,16 +12,18 @@ provider:
   memorySize: 512
   environment:
     PGSQL_DB_INFO_SSM_PATH: "/flickrgroupaddr/resources/pgsql/creds"
-  iamRoleStatements:
-    - Effect: "Allow"
-      Action:
-        - "ssm:GetParameter"
-        - "ssm:GetParameters"
-        - "ssm:PutParameter"
-      Resource: "arn:aws:ssm:us-east-2:293119271420:parameter/flickrgroupaddr/*"
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "ssm:GetParameter"
+            - "ssm:GetParameters"
+            - "ssm:PutParameter"
+          Resource: "arn:aws:ssm:us-east-2:293119271420:parameter/flickrgroupaddr/*"
 
 functions:
-  ui-api-user-add-user-request:
+  flickr-attempt-add:
     handler: flickr-proxy.attempt_flickr_group_add
     events:
       - sns:
