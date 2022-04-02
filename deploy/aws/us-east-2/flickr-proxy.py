@@ -6,6 +6,7 @@ import flickrapi.auth
 import datetime
 import psycopg2
 import uuid
+import pprint
 
 
 logging_level = logging.DEBUG
@@ -45,6 +46,10 @@ def _read_event(event):
                             curr_record['Sns']['Message'] )
 
     return app_requests
+
+
+def _get_postgresql_creds():
+    return _read_value_from_ssm( "/flickrgroupaddr/resources/pgsql/creds" )
 
 
 def _get_flickr_user_creds( user_cognito_id ):
@@ -88,24 +93,91 @@ def _create_flickr_api_handle( app_flickr_api_key_info, user_flickr_auth_info ):
     return flickrapi_handle
 
 
+def _generate_postgres_db_handle( pgsql_creds ):
+    #logger.debug( "Attempting DB connect" )
+    #logger.debug( json.dumps(pgsql_creds, indent=4, sort_keys=True) )
+
+    db_handle = psycopg2.connect(
+        host        = pgsql_creds['db_host'],
+        user        = pgsql_creds['db_user'],
+        password    = pgsql_creds['db_passwd'],
+        database    = pgsql_creds['database_name'] )
+
+    #logger.debug( "Back from DB connect" )
+
+    return db_handle
+
+
+def _can_attempt_request( db_cursor, curr_user_request ):
+
+    # Get most recent row of attempt status for this request -- if any
+    sql_command = """
+        SELECT DATE(attempt_started) AS most_recent_attempt_date, final_status AS most_recent_attempt_status
+        FROM group_add_attempts
+        WHERE submitted_request_fk = %s
+        ORDER BY attempt_started DESC
+        LIMIT 1;
+    """
+
+    sql_parameters = ( curr_user_request['user_submitted_request_id'], )
+    db_cursor.execute( sql_command, sql_parameters )
+    db_row = db_cursor.fetchone()
+    if db_row: 
+        most_recent_attempt_date = db_row[0][0]
+        attempt_status = db_row[0][1]
+
+        logger.debug( "Most recent date: " + pprint.pformat(most_recent_attempt_date) )
+
+        #curr_date = datetime.datetime.now( datetime.timezone.utc ).date().isoformat()
+
+        can_attempt = False
+
+    else: 
+        logger.debug( f"User request {curr_user_request['user_submitted_request_id']} has never been tried, can attempt" )
+        # We've never tried it, so sure!
+        can_attempt = True
+
+    logger.debug( f"Result of can attempt on request {curr_user_request['user_submitted_request_id']}: {can_attempt}" ) 
+
+
+    return can_attempt
+
+
+
 def _process_app_requests( app_requests ):
+    flickr_creds_app = None
+
     for curr_request in app_requests:
         logger.debug( "Processing request:\n" + json.dumps(curr_request, indent=4, sort_keys=True) )
 
-        
         flickr_creds_user = _get_flickr_user_creds( curr_request['user_cognito_id'] )
         if not flickr_creds_user:
             logger.warn( f"Could not find flickr creds for Cognito user ID \"{curr_request['user_cognito_id']}\", bailing" )
             continue
 
-        # Now that we know the user is valid, pull FGA's app auth info 
-        flickr_creds_app = _get_flickr_app_creds()
+        # Now that we know the user is valid, do the heavier lifting
+        pgsql_creds = _get_postgresql_creds()
 
-        logger.debug( "Successfully retrieved Flickr user and app creds from Parameter Store" )
+        logger.debug( "Got PostgreSQL creds" )
+        
+        # By using these two "with" statements on Postgres, if we exit them without having thrown an exception, we get an auto commit
+        with _generate_postgres_db_handle( pgsql_creds ) as db_handle:
+            with db_handle.cursor() as db_cursor:
 
-        flickrapi_handle = _create_flickr_api_handle( flickr_creds_app, flickr_creds_user )
+                # Make sure we don't have a permanent status for this request or an attempt in the current UTC day
+                if _can_attempt_request( db_cursor, curr_request ) is False:
+                    continue
 
-        logger.debug( "Successfully created Flickr API handle with app & user creds" )
+                logger.debug( "We can attempt request, proceeding" )
+        
+                if flickr_creds_app is None:
+                    flickr_creds_app = _get_flickr_app_creds()
+                    logger.debug( "Successfully retrieved Flickr user and app creds from Parameter Store" )
+
+                flickrapi_handle = _create_flickr_api_handle( flickr_creds_app, flickr_creds_user )
+                logger.debug( "Successfully created Flickr API handle with app & user creds" )
+
+    logger.debug( "Leaving process app requests" )
 
 
 
