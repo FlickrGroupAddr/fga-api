@@ -41,6 +41,11 @@ def _read_event(event):
     return app_requests
 
 
+def _process_app_requests( app_requests ):
+    for curr_request in app_requests:
+        logger.debug( "Processing request:\n" + json.dumps(curr_request, indent=4, sort_keys=True) )
+
+
 def attempt_flickr_group_add(event, context):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
     #print( json.dumps( event, indent=4, sort_keys=True ) )
@@ -49,5 +54,7 @@ def attempt_flickr_group_add(event, context):
         app_requests = _read_event( event )
         logger.debug( "Got app_requests:" )
         logger.debug( json.dumps( app_requests, indent=4, sort_keys=True) )
+
+        _process_app_requests( app_requests )
     except:
         logger.warn("Unhandled exception thrown, bailing")
