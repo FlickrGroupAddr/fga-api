@@ -123,14 +123,19 @@ def _can_attempt_request( db_cursor, curr_user_request ):
     db_cursor.execute( sql_command, sql_parameters )
     db_row = db_cursor.fetchone()
     if db_row: 
-        most_recent_attempt_date = db_row[0][0]
-        attempt_status = db_row[0][1]
+        most_recent_attempt_date = db_row[0]
+        most_recent_attempt_status = db_row[1]
 
-        logger.debug( "Most recent date: " + pprint.pformat(most_recent_attempt_date) )
+        #logger.debug( "Most recent date: " + pprint.pformat(most_recent_attempt_date) )
+        #logger.debug( f"Most recent status: {most_recent_attempt_status}" )
 
-        #curr_date = datetime.datetime.now( datetime.timezone.utc ).date().isoformat()
+        curr_date = datetime.datetime.now( datetime.timezone.utc ).date()
 
-        can_attempt = False
+        # We can attempt as long as:
+        #   - most recent attempt was not within the current UTC day *and*
+        #   - most recent status was not a permstatus 
+        can_attempt = most_recent_attempt_status.startswith("permstatus_") is False and \
+            most_recent_attempt_date != curr_utc_date
 
     else: 
         logger.debug( f"User request {curr_user_request['user_submitted_request_id']} has never been tried, can attempt" )
@@ -138,7 +143,6 @@ def _can_attempt_request( db_cursor, curr_user_request ):
         can_attempt = True
 
     logger.debug( f"Result of can attempt on request {curr_user_request['user_submitted_request_id']}: {can_attempt}" ) 
-
 
     return can_attempt
 
