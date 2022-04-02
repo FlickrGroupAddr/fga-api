@@ -147,6 +147,98 @@ def _can_attempt_request( db_cursor, curr_user_request ):
     return can_attempt
 
 
+def _get_group_memberships_for_user( flickrapi_handle ):
+    return_groups = {}
+    user_groups = flickrapi_handle.groups.pools.getGroups()
+
+    #logger.debug( "User memberships:\n" + json.dumps(user_groups, indent=4, sort_keys=True))
+    if 'groups' in user_groups and 'group' in user_groups['groups']:
+        for curr_group in user_groups['groups']['group']:
+            #logger.debug("Processing group:\n" + json.dumps(curr_group, indent=4, sort_keys=True) )
+            if 'id' in curr_group:
+                return_groups[curr_group['id']] = None
+
+    return return_groups
+
+
+def _get_group_memberships_for_pic( flickrapi_handle, pic_id ):
+    pic_contexts = flickrapi_handle.photos.getAllContexts( photo_id=pic_id )
+
+    logger.debug( "Contexts:\n" + json.dumps(pic_contexts, indent=4, sort_keys=True))
+    group_memberships = {}
+    if 'pool' in pic_contexts:
+        for curr_group in pic_contexts['pool']:
+            group_memberships[ curr_group['id']] = curr_group
+
+    logger.debug( "Group memberships:\n" + json.dumps(group_memberships, indent=4, sort_keys=True))
+
+    return group_memberships
+
+
+def _perform_group_add( flickrapi_handle, photo_id, group_id ):
+    current_timestamp = datetime.datetime.now( datetime.timezone.utc ).replace( microsecond=0 )
+
+    try:
+        logger.info(f"Attempting to add photo {photo_id} to group {group_id}")
+        flickrapi_handle.groups.pools.add( photo_id=photo_id, group_id=group_id )
+
+        # Success!
+        logger.info( f"Successful attempt to add photo {photo_id} to group {group_id}!" )
+        operation_status = 'permstatus_success_added' 
+
+    except flickrapi.exceptions.FlickrError as e:
+        error_string = str(e)
+        group_throttled_msg = "Error: 5:"
+        adding_to_pending_queue_error_msg = "Error: 6:"
+        if error_string.startswith(group_throttled_msg):
+            operation_status = 'defer_group_throttled_for_user'
+            logger.info(f"This user is throttled by group {group_id}" )
+        elif error_string.startswith(adding_to_pending_queue_error_msg):
+            operation_status = 'permstatus_success_added_queued'
+            logger.info( f"Success (message added to queue for admin review)" )
+        else:
+            logger.warn( f"Unexpected error: {error_string}" )
+            operation_status = f"fail_{error_string}" 
+
+    return operation_status
+
+
+def _attempt_flickr_add( curr_user_request, flickrapi_handle ):
+    group_memberships_for_user = _get_group_memberships_for_user( flickrapi_handle )
+    group_memberships_for_pic = _get_group_memberships_for_pic( flickrapi_handle, curr_user_request['flickr_picture_id'] )
+
+    logger.debug( "User memberships:" )
+    logger.debug( json.dumps(group_memberships_for_user, indent=4, sort_keys=True) )
+    logger.debug( "Pic group memberships:" )
+    logger.debug( json.dumps(group_memberships_for_pic, indent=4, sort_keys=True) )
+    
+    # If the user isn't in the requested group, mark a permfail
+    if curr_user_request['flickr_group_id'] not in group_memberships_for_user:
+
+        logger.debug( "User requested a picture be added into a group they are not in" )
+        attempt_status = "permstatus_fail_user_not_in_flickr_group"
+
+    # If this pic is already in the requested group, skip it
+    elif curr_user_request['flickr_group_id'] in group_memberships_for_pic:
+
+        logger.debug( f"Pic {curr_user_request['flickr_picture_id']} already in group " +
+            f"{curr_user_request['flickr_group_id']}" )
+
+        attempt_status = "permstatus_success_pic_already_in_group"
+
+    else:
+        results_of_add_attempt = _perform_group_add( 
+            flickrapi_handle, 
+            curr_user_request['flickr_picture_id'],
+            curr_user_request['flickr_group_id'] )
+
+        attempt_status = results_of_add_attempt
+
+    logger.info( f"Final Flickr operation status: {attempt_status}" )
+
+    return attempt_status
+
+
 
 def _process_app_requests( app_requests ):
     flickr_creds_app = None
@@ -181,6 +273,10 @@ def _process_app_requests( app_requests ):
                 flickrapi_handle = _create_flickr_api_handle( flickr_creds_app, flickr_creds_user )
                 logger.debug( "Successfully created Flickr API handle with app & user creds" )
 
+                attempt_status = _attempt_flickr_add( curr_request, flickrapi_handle )
+
+                # Need to update Postgres
+
     logger.debug( "Leaving process app requests" )
 
 
@@ -188,7 +284,6 @@ def _process_app_requests( app_requests ):
 
 def attempt_flickr_group_add(event, context):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
-    #print( json.dumps( event, indent=4, sort_keys=True ) )
 
     try:
         app_requests = _read_event( event )
@@ -198,3 +293,4 @@ def attempt_flickr_group_add(event, context):
         _process_app_requests( app_requests )
     except Exception as e:
         logger.error("Unhandled exception caught at top level, bailing: " + str(e) )
+        raise e
