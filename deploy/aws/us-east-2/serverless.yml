@@ -1,0 +1,37 @@
+service: flickrgroupaddr-api-aws-us-east-2
+
+frameworkVersion: '3'
+
+configValidationMode: error
+
+
+provider:
+  name: aws
+  runtime: python3.8
+  region: us-east-2
+  memorySize: 512
+  environment:
+    PGSQL_DB_INFO_SSM_PATH: "/flickrgroupaddr/resources/pgsql/creds"
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "ssm:GetParameter"
+        - "ssm:GetParameters"
+        - "ssm:PutParameter"
+      Resource: "arn:aws:ssm:us-east-2:293119271420:parameter/flickrgroupaddr/*"
+
+functions:
+  ui-api-user-add-user-request:
+    handler: flickr-proxy.attempt_flickr_group_add
+    events:
+      - sns:
+          arn: !Ref fgaAttemptAddTopic
+          topicName: AttemptFlickrGroupAdd
+
+resources: 
+  Resources:
+    fgaAttemptAddTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: AttemptFlickrGroupAdd
+      
