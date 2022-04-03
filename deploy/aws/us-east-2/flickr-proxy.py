@@ -151,29 +151,44 @@ def _can_attempt_request( db_cursor, curr_user_request ):
 
 
 def _get_group_memberships_for_user( flickrapi_handle ):
-    return_groups = {}
-    user_groups = flickrapi_handle.groups.pools.getGroups()
+    return_groups = None
 
-    #logger.debug( "User memberships:\n" + json.dumps(user_groups, indent=4, sort_keys=True))
-    if 'groups' in user_groups and 'group' in user_groups['groups']:
-        for curr_group in user_groups['groups']['group']:
-            #logger.debug("Processing group:\n" + json.dumps(curr_group, indent=4, sort_keys=True) )
-            if 'id' in curr_group:
-                return_groups[curr_group['id']] = None
+    try:
+        user_groups = flickrapi_handle.groups.pools.getGroups()
+
+        #logger.debug( "User memberships:\n" + json.dumps(user_groups, indent=4, sort_keys=True))
+        if 'groups' in user_groups and 'group' in user_groups['groups']:
+            return_groups = {}
+            for curr_group in user_groups['groups']['group']:
+                #logger.debug("Processing group:\n" + json.dumps(curr_group, indent=4, sort_keys=True) )
+                if 'id' in curr_group:
+                    return_groups[curr_group['id']] = None
+    except Exception as e:
+        if logging_level == logging.DEBUG:
+            raise e
+        else:
+            logging.warn( f"Exception thrown when getting group memberships for user: {str(e)}" )
 
     return return_groups
 
 
 def _get_group_memberships_for_pic( flickrapi_handle, pic_id ):
-    pic_contexts = flickrapi_handle.photos.getAllContexts( photo_id=pic_id )
+    group_memberships = None
+    try:
+        pic_contexts = flickrapi_handle.photos.getAllContexts( photo_id=pic_id )
+        logger.debug( "Contexts:\n" + json.dumps(pic_contexts, indent=4, sort_keys=True))
+        group_memberships = {}
+        if 'pool' in pic_contexts:
+            for curr_group in pic_contexts['pool']:
+                group_memberships[ curr_group['id']] = curr_group
 
-    logger.debug( "Contexts:\n" + json.dumps(pic_contexts, indent=4, sort_keys=True))
-    group_memberships = {}
-    if 'pool' in pic_contexts:
-        for curr_group in pic_contexts['pool']:
-            group_memberships[ curr_group['id']] = curr_group
+        logger.debug( "Group memberships:\n" + json.dumps(group_memberships, indent=4, sort_keys=True))
 
-    logger.debug( "Group memberships:\n" + json.dumps(group_memberships, indent=4, sort_keys=True))
+    except Exception as e:
+        if logging_level == logging.DEBUG:
+            raise e
+        else:
+            logging.warn( f"Exception thrown when trying to get Flickr groups for pic {pic_id}: {str(e)}" )
 
     return group_memberships
 
@@ -209,6 +224,10 @@ def _perform_group_add( flickrapi_handle, photo_id, group_id ):
 def _attempt_flickr_add( curr_user_request, flickrapi_handle, db_cursor ):
     group_memberships_for_user = _get_group_memberships_for_user( flickrapi_handle )
     group_memberships_for_pic = _get_group_memberships_for_pic( flickrapi_handle, curr_user_request['flickr_picture_id'] )
+
+    if group_memberships_for_user is None or group_memberships_for_pic is None:
+        logger.warn("Exception thrown when pulling groups for group or user, bailing on attempt" )
+        return
 
     #logger.debug( "User memberships:" )
     #logger.debug( json.dumps(group_memberships_for_user, indent=4, sort_keys=True) )

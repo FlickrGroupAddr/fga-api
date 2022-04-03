@@ -9,7 +9,10 @@ provider:
   name: aws
   runtime: python3.8
   region: us-east-2
-  memorySize: 512
+
+  # Note, we did testing for mem: https://docs.google.com/spreadsheets/d/1QjMKvrFh_-B4ROGMZFGfRTCLOvASis9w0LmgCRx_DOE
+  memorySize: 256       
+
   environment:
     PGSQL_DB_INFO_SSM_PATH: "/flickrgroupaddr/resources/pgsql/creds"
     SNS_TOPIC_ARN: !Ref fgaAttemptAddTopic

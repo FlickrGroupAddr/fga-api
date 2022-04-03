@@ -7,7 +7,7 @@ import uuid
 import os
 
 
-logging_level = logging.DEBUG
+logging_level = logging.INFO
 
 logger = logging.getLogger()
 logger.setLevel(logging_level)
