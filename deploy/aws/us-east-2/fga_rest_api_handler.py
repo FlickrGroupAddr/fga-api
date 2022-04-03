@@ -28,7 +28,7 @@ def _create_apigw_http_response( http_status_code, json_body, additional_headers
     return_dict = {
         "statusCode"    : http_status_code,
         "body"          : json.dumps( json_body, indent=4, sort_keys=True ), 
-        "headers"       : return_headers,
+        #"headers"       : return_headers,
     }
 
     return return_dict
