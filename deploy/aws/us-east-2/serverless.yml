@@ -21,8 +21,17 @@ provider:
             - "ssm:GetParameters"
             - "ssm:PutParameter"
           Resource: "arn:aws:ssm:us-east-2:293119271420:parameter/flickrgroupaddr/*"
+  httpApi:
+    cors: true
 
 functions:
+  api-new-request:
+    handler: fga_rest_api_handler.create_new_fga_request
+    events:
+      - httpApi:
+          path: /api/v001/fga_request
+          method: post
+
   flickr-attempt-add:
     handler: flickr-proxy.attempt_flickr_group_add
     events:
