@@ -129,13 +129,16 @@ def _can_attempt_request( db_cursor, curr_user_request ):
         #logger.debug( "Most recent date: " + pprint.pformat(most_recent_attempt_date) )
         #logger.debug( f"Most recent status: {most_recent_attempt_status}" )
 
-        curr_date = datetime.datetime.now( datetime.timezone.utc ).date()
+        curr_utc_date = datetime.datetime.now( datetime.timezone.utc ).date()
 
         # We can attempt as long as:
         #   - most recent attempt was not within the current UTC day *and*
         #   - most recent status was not a permstatus 
-        can_attempt = most_recent_attempt_status.startswith("permstatus_") is False and \
-            most_recent_attempt_date != curr_utc_date
+        has_permstatus = most_recent_attempt_status.startswith("permstatus_")
+        too_soon = most_recent_attempt_date == curr_utc_date
+        can_attempt = has_permstatus is False and too_soon is False
+        if can_attempt is False:
+            logger.info( f"Cannot attempt request: has_permstatus={has_permstatus}, too_soon={too_soon}, ignoring request" )
 
     else: 
         logger.debug( f"User request {curr_user_request['user_submitted_request_id']} has never been tried, can attempt" )
@@ -267,7 +270,7 @@ def _process_app_requests( app_requests ):
     flickr_creds_app = None
 
     for curr_request in app_requests:
-        logger.debug( "Processing request:\n" + json.dumps(curr_request, indent=4, sort_keys=True) )
+        logger.info( "Processing request:\n" + json.dumps(curr_request, indent=4, sort_keys=True) )
 
         flickr_creds_user = _get_flickr_user_creds( curr_request['user_cognito_id'] )
         if not flickr_creds_user:
