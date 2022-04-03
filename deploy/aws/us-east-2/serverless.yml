@@ -12,6 +12,7 @@ provider:
   memorySize: 512
   environment:
     PGSQL_DB_INFO_SSM_PATH: "/flickrgroupaddr/resources/pgsql/creds"
+    SNS_TOPIC_ARN: !Ref fgaAttemptAddTopic
   iam:
     role:
       statements:
@@ -21,6 +22,12 @@ provider:
             - "ssm:GetParameters"
             - "ssm:PutParameter"
           Resource: "arn:aws:ssm:us-east-2:293119271420:parameter/flickrgroupaddr/*"
+
+        - Effect: "Allow"
+          Action:
+            - "SNS:Publish"
+          Resource: !Ref fgaAttemptAddTopic
+
   httpApi:
     cors: 
       allowedOrigins:

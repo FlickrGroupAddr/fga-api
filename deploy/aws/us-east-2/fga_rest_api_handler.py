@@ -4,6 +4,7 @@ import logging
 import datetime
 import psycopg2
 import uuid
+import os
 
 
 logging_level = logging.DEBUG
@@ -12,6 +13,7 @@ logger = logging.getLogger()
 logger.setLevel(logging_level)
 
 ssm = boto3.client('ssm', region_name='us-east-2' )
+sns = boto3.client('sns', region_name='us-east-2' )
 
 
 def _create_apigw_http_response( http_status_code, json_body, additional_headers = None ):
@@ -94,8 +96,57 @@ def _get_flickr_user_creds( user_cognito_id ):
     return _read_value_from_ssm( f"/flickrgroupaddr/user/{user_cognito_id}/secrets/flickr" )
 
 
+def _do_sns_notify( api_request, success_body ):
+    logger.debug( "Starting SNS notification due to successful DB insert" )
+
+    # let's see if the attempt to store the ARN of the generated SNS topic by serverless in env var worked
+    sns_topic_arn = os.getenv( 'SNS_TOPIC_ARN' )
+    if sns_topic_arn:
+        logger.debug( f"SNS Topic ARN was found in env vars: {sns_topic_arn}, sending notification" )
+        try:
+            request_guid        = json.loads( success_body )['fga_request_guid']
+            user_cognito_id     = api_request['user_cognito_id']
+            flickr_picture_id   = api_request['flickr_picture_id']
+            flickr_group_id     = api_request['flickr_group_id']
+
+            sns_notification = {
+  	            "user_submitted_request_id"     : request_guid,
+	            "user_cognito_id"               : user_cognito_id,
+	            "flickr_picture_id"             : flickr_picture_id,
+	            "flickr_group_id"               : flickr_group_id,
+            }
+
+            logger.debug( "SNS notification text" )
+            sns_notification_text = json.dumps( sns_notification, indent=4, sort_keys=True )
+            logger.debug( sns_notification_text )
+
+            sns.publish( 
+                TopicArn    = sns_topic_arn,
+                Message     = sns_notification_text,
+            )
+
+            logging.info( "Successfully published notification of new FGA request to SNS" )
+        except Exception as e:
+            if logging_level == logging.DEBUG:
+                raise e
+            else:
+                logger.warn( f"Exception thrown when trying to publish to SNS topic: {str(e)}" )
+    else:
+        logger.warn( "Could not find SNS topic ARN in env var, cannot post to SNS" )
+
+
 def _process_api_request( api_request ):
 
+    response = _do_db_insert( api_request )
+
+    if response["statusCode"] == 200:
+        # Posting to SNS is a nice to have, failure at this point is invisible to the caller
+        _do_sns_notify( api_request, response['body'] )
+
+    return response
+
+
+def _do_db_insert( api_request ):
     flickr_creds_user = _get_flickr_user_creds( api_request['user_cognito_id'] )
     if not flickr_creds_user:
         logger.warn( f"Could not find flickr creds for Cognito user ID \"{api_request['user_cognito_id']}\", bailing" )
@@ -142,6 +193,8 @@ def _process_api_request( api_request ):
                             }  
                         )
 
+                        logging.info( f"Successful request, added to DB, assigned GUID {str(add_attempt_guid)}" )
+
                     else:
                         response =  _create_apigw_http_response( 500, 
                             { 
@@ -149,6 +202,7 @@ def _process_api_request( api_request ):
                             }
                         )
                 except psycopg2.Error as e:
+                    logging.warn( f"Operation failed, DB exception thrown: {str(e)}" )
                     response = _create_apigw_http_response( 
                         500,
                         {
