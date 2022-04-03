@@ -22,7 +22,9 @@ provider:
             - "ssm:PutParameter"
           Resource: "arn:aws:ssm:us-east-2:293119271420:parameter/flickrgroupaddr/*"
   httpApi:
-    cors: true
+    cors: 
+      allowedOrigins:
+        - "https://flickrgroupaddr.com"
 
 functions:
   api-new-request:
