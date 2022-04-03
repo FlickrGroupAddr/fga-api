@@ -40,14 +40,17 @@ def _read_request( event ):
         'flickr_group_id', 
     )
 
-    if 'queryStringParameters' in event and all( key in event['queryStringParameters'] for key in
-        required_query_string_parameters ):
+    if 'queryStringParameters' in event \
+            and all( key in event['queryStringParameters'] for key in required_query_string_parameters ) \
+            and 'headers' in event \
+            and 'authorization' in event['headers']:
 
         response = {}
 
         for curr_param in required_query_string_parameters:
             response[ curr_param ] = event['queryStringParameters'][curr_param]
 
+        response[ 'user_cognito_id' ] = event['headers']['authorization']
     else:
         response = None
  
@@ -72,7 +75,7 @@ def create_new_fga_request(event, context):
             response = _process_api_request( api_request )
         else:
             logger.warn( "No valid request found in API call, ignoring" )
-            response =  _create_apigw_http_response( 400, { "error": "invalid/missing request parameters" } )
+            response =  _create_apigw_http_response( 400, { "error": "invalid/missing request parameters or request headers" } )
 
     except Exception as e:
         # If we are in debug mode, go ahead and raise the exception to give a nice
