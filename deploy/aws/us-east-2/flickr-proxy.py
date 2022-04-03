@@ -9,7 +9,7 @@ import uuid
 import pprint
 
 
-logging_level = logging.DEBUG
+logging_level = logging.INFO
 
 logger = logging.getLogger()
 logger.setLevel(logging_level)
@@ -203,14 +203,29 @@ def _perform_group_add( flickrapi_handle, photo_id, group_id ):
     return operation_status
 
 
-def _attempt_flickr_add( curr_user_request, flickrapi_handle ):
+def _attempt_flickr_add( curr_user_request, flickrapi_handle, db_cursor ):
     group_memberships_for_user = _get_group_memberships_for_user( flickrapi_handle )
     group_memberships_for_pic = _get_group_memberships_for_pic( flickrapi_handle, curr_user_request['flickr_picture_id'] )
 
-    logger.debug( "User memberships:" )
-    logger.debug( json.dumps(group_memberships_for_user, indent=4, sort_keys=True) )
-    logger.debug( "Pic group memberships:" )
-    logger.debug( json.dumps(group_memberships_for_pic, indent=4, sort_keys=True) )
+    #logger.debug( "User memberships:" )
+    #logger.debug( json.dumps(group_memberships_for_user, indent=4, sort_keys=True) )
+    #logger.debug( "Pic group memberships:" )
+    #logger.debug( json.dumps(group_memberships_for_pic, indent=4, sort_keys=True) )
+
+    add_attempt_guid    = str( uuid.uuid4() )
+    request_id          = curr_user_request[ 'user_submitted_request_id' ]
+    current_timestamp   = datetime.datetime.now( datetime.timezone.utc )
+
+    sql_command = """
+        INSERT INTO group_add_attempts( uuid_pk, submitted_request_fk, attempt_started )
+        VALUES ( %s, %s, %s )
+        RETURNING uuid_pk;
+    """
+
+    sql_params = ( add_attempt_guid, request_id, current_timestamp )
+    db_cursor.execute( sql_command, sql_params )
+
+    add_attempt_guid = db_cursor.fetchone()[0]
     
     # If the user isn't in the requested group, mark a permfail
     if curr_user_request['flickr_group_id'] not in group_memberships_for_user:
@@ -236,7 +251,15 @@ def _attempt_flickr_add( curr_user_request, flickrapi_handle ):
 
     logger.info( f"Final Flickr operation status: {attempt_status}" )
 
-    return attempt_status
+    current_timestamp   = datetime.datetime.now( datetime.timezone.utc )
+    sql_command = """
+        UPDATE group_add_attempts
+        SET attempt_completed = %s, final_status = %s
+        WHERE uuid_pk = %s;
+    """
+
+    sql_params = ( current_timestamp, attempt_status, add_attempt_guid )
+    db_cursor.execute( sql_command, sql_params )
 
 
 
@@ -273,9 +296,7 @@ def _process_app_requests( app_requests ):
                 flickrapi_handle = _create_flickr_api_handle( flickr_creds_app, flickr_creds_user )
                 logger.debug( "Successfully created Flickr API handle with app & user creds" )
 
-                attempt_status = _attempt_flickr_add( curr_request, flickrapi_handle )
-
-                # Need to update Postgres
+                _attempt_flickr_add( curr_request, flickrapi_handle, db_cursor )
 
     logger.debug( "Leaving process app requests" )
 
