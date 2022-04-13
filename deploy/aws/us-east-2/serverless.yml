@@ -13,6 +13,14 @@ provider:
   # Note, we did testing for mem: https://docs.google.com/spreadsheets/d/1QjMKvrFh_-B4ROGMZFGfRTCLOvASis9w0LmgCRx_DOE
   memorySize: 256       
 
+  # RDS is private inside the VPC, so we need to put the Lambdas that talk to it inside that same place
+  vpc:
+    securityGroupIds:
+      - sg-02b9233a738009aad
+    subnetIds:
+      - subnet-077282b17b490bf96 
+      - subnet-0cc3044b10111fd42
+
   environment:
     PGSQL_DB_INFO_SSM_PATH: "/flickrgroupaddr/resources/pgsql/creds"
     SNS_TOPIC_ARN: !Ref fgaAttemptAddTopic
@@ -46,10 +54,21 @@ functions:
 
   flickr-attempt-add:
     handler: flickr-proxy.attempt_flickr_group_add
+    vpc: ~              # Tilde means null -- this function cannot be in the VPC, it needs to talk to flickr
+    environment:
+      SQS_QUEUE_URL: ${construct:add-attempt-queue.queueUrl}
     events:
       - sns:
           arn: !Ref fgaAttemptAddTopic
           topicName: AttemptFlickrGroupAdd
+
+  oauth-callback:
+    handler: cognito-oauth-callback.cognito_oauth_callback_webui_dev
+    vpc: ~
+    events:
+      - httpApi:
+          path: /oauth/callback
+          method: get
 
 resources: 
   Resources:
@@ -57,11 +76,20 @@ resources:
       Type: AWS::SNS::Topic
       Properties:
         TopicName: AttemptFlickrGroupAdd
+
+constructs:
+  add-attempt-queue:
+    type: queue
+    fifo: true
+    maxRetries: 1
+    worker:
+      handler: db-updater.update_group_add_attempt
       
 	
 plugins:
   - serverless-python-requirements
- 
+  - serverless-lift
+
 custom:
   pythonRequirements:
     dockerizePip: true
