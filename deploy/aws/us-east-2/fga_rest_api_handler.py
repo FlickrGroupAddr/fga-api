@@ -238,3 +238,23 @@ def create_new_fga_request(event, context):
             logger.critical("Unhandled exception caught at top level, bailing: " + str(e) )
 
     return response
+
+
+
+def have_flickr_creds( event, context):
+
+
+    try:
+        response =  _create_apigw_http_response( 200, { "have_flickr_creds": False } )
+
+    except Exception as e:
+        # If we are in debug mode, go ahead and raise the exception to give a nice
+        #       stack trace for troubleshooting
+        if logging_level == logging.DEBUG:
+            raise e
+        else:
+            logger.critical("Unhandled exception caught at top level, bailing: " + str(e) )
+            response = _create_apigw_http_response( 500, None )
+
+    return response
+

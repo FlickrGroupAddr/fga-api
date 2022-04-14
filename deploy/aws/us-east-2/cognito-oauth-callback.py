@@ -78,25 +78,25 @@ def cognito_oauth_callback_webui_dev(event, context):
         # Get the user's GUID from the decoded token info
         user_cognito_id = session_state['cognito_session_data']['decoded_tokens']['id_token']['claims']['sub']
 
-        # Cannot use HttpOnly restriction or JS can't see the cookie to send it.
-        # Have to set SameSite=None until the api and ui are both under same domain
-        #headers = {
-            #'set-cookie'    : "GWP_USER_SESSION_ID={0}; Max-Age=3600; Domain=3ws38fheaf.execute-api.us-east-1.amazonaws.com; Path=/; Secure; SameSite=None".format( selected_guid ),
-            # Expire cookie in a week
-            #'set-cookie'    : f"FLICKRGROUPADDR_BEARER_TOKEN={bearer_token}; Max-Age=604800; Path=/; Secure; SameSite=None",
-            #'location'      : "https://flickrgroupaddr.com/console" 
-        #}
-
-        status_code = 200
-
-        body = { 
-            "access_token": cognito_response['access_token'],
-            "refresh_token": cognito_response['refresh_token'],
+        # Bounce them back to the console with the access token encoded in the URL
+        headers = {
+            'location'       : "https://flickrgroupaddr.com/console/index.html?access_token=" + \
+                requests.utils.quote( cognito_response['access_token'] )
         }
+
+        status_code = 302
+
+        body = None
+
+
+    if body is not None:
+        body_text = json.dumps( body, indent=4, sort_keys=True )
+    else:
+        body_text = None
 
     response = {
         "statusCode"    : status_code,
-        "body"          : json.dumps( body, indent=4, sort_keys=True )
+        "body"          : body_text,
     }
 
     if headers is not None:

@@ -43,6 +43,14 @@ provider:
     cors: 
       allowedOrigins:
         - "https://flickrgroupaddr.com"
+    authorizers:
+      fgaJwtAuthorizer:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: https://cognito-idp.us-east-2.amazonaws.com/us-east-2_A4sKVVFEx
+        audience:
+           - 54om78s59usqmo8nqdr7m7bktg
+
 
 functions:
   api-new-request:
@@ -61,6 +69,15 @@ functions:
       - sns:
           arn: !Ref fgaAttemptAddTopic
           topicName: AttemptFlickrGroupAdd
+  api-have-flickr-creds:
+    handler: fga_rest_api_handler.have_flickr_creds
+    vpc: ~
+    events:
+      - httpApi:
+          path: /api/v001/flickr_creds
+          method: get
+          authorizer:
+            name: fgaJwtAuthorizer
 
   oauth-callback:
     handler: cognito-oauth-callback.cognito_oauth_callback_webui_dev
