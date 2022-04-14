@@ -68,7 +68,7 @@ def _read_value_from_ssm( path_string ):
             ssm.get_parameter(Name=path_string)['Parameter']['Value'] )
 
     except:
-        logger.error(f"Exception thrown when trying to read SSM data at path {path_string}" )
+        logger.warn(f"Exception thrown when trying to read SSM data at path {path_string}" )
 
     return ssm_response
         
@@ -215,6 +215,21 @@ def _do_db_insert( api_request ):
     return response
 
 
+def _get_cognito_user_id_from_event( event ):
+    if 'requestContext' in event and 'authorizer' in event['requestContext'] \
+            and 'jwt' in event['requestContext']['authorizer'] \
+            and 'claims' in event['requestContext']['authorizer']['jwt'] \
+            and 'sub' in event['requestContext']['authorizer']['jwt']['claims']:
+
+        cognito_user_id = event['requestContext']['authorizer']['jwt']['claims']['sub']
+    else:
+        logger.error("Could not find cognito user ID in event object" )
+        cognito_user_id = None
+
+    return cognito_user_id
+
+
+
 def create_new_fga_request(event, context):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
@@ -240,12 +255,18 @@ def create_new_fga_request(event, context):
     return response
 
 
-
 def have_flickr_creds( event, context):
-
+    logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
     try:
-        response =  _create_apigw_http_response( 200, { "have_flickr_creds": False } )
+        cognito_user_id = _get_cognito_user_id_from_event( event ) 
+        logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
+
+        have_flickr_creds = _get_flickr_user_creds( cognito_user_id ) is not None
+
+        response_body = { "have_flickr_creds": have_flickr_creds } 
+        response = _create_apigw_http_response( 200, response_body )
+
 
     except Exception as e:
         # If we are in debug mode, go ahead and raise the exception to give a nice
