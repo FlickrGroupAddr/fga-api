@@ -97,6 +97,14 @@ functions:
           path: /oauth/callback
           method: get
 
+  user-perms-callback:
+    handler: fga_rest_api_handler.user_permission_granted_callback
+    vpc: ~
+    events:
+      - httpApi:
+          path: /api/v001/flickr/user-permission-granted-callback
+          method: get
+
 resources: 
   Resources:
     fgaAttemptAddTopic:

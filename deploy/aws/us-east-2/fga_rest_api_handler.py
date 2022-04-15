@@ -5,6 +5,8 @@ import datetime
 import psycopg2
 import uuid
 import os
+import flickrapi
+import flickrapi.auth
 
 
 logging_level = logging.DEBUG
@@ -75,6 +77,14 @@ def _read_value_from_ssm( path_string ):
 
 def _get_postgresql_creds():
     return _read_value_from_ssm( "/flickrgroupaddr/resources/pgsql/creds" )
+
+
+def _get_flickr_app_creds():
+    return _read_value_from_ssm( "/flickrgroupaddr/resources/flickr/fga_app_api_key" )
+
+
+def _get_flickr_user_perms_granted_callback():
+    return _read_value_from_ssm( "/flickrgroupaddr/resources/flickr/user-permission-granted-callback" )
 
 
 def _generate_postgres_db_handle( pgsql_creds ):
@@ -295,7 +305,18 @@ def put_flickr_id( event, context ):
         cognito_user_id = _get_cognito_user_id_from_event( event )
         logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
 
-        auth_url = "https://flickr.com/123456" 
+        flickr_app_creds = _get_flickr_app_creds()
+
+        flickr = flickrapi.FlickrAPI(
+            flickr_app_creds['api_key'],
+            flickr_app_creds['api_key_secret'],
+            store_token = False)
+
+        permissions_granted_callback_url = _get_flickr_user_perms_granted_callback()
+
+        flickr.get_request_token(oauth_callback=permissions_granted_callback_url)
+
+        auth_url = flickr.auth_url( perms='write' )
 
         response_body = { "flickr_auth_url": auth_url }
         response = _create_apigw_http_response( 200, response_body )
@@ -312,3 +333,21 @@ def put_flickr_id( event, context ):
 
     return response
 
+
+
+def user_permission_granted_callback( event, context ):
+    logger.debug( json.dumps( event, indent=4, sort_keys=True) )
+
+    try:
+        response =  _create_apigw_http_response( 204, None )
+
+    except Exception as e:
+        # If we are in debug mode, go ahead and raise the exception to give a nice
+        #       stack trace for troubleshooting
+        if logging_level == logging.DEBUG:
+            raise e
+        else:
+            logger.critical("Unhandled exception caught at top level, bailing: " + str(e) )
+            response = _create_apigw_http_response( 500, None )
+
+    return response
