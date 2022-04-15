@@ -69,13 +69,23 @@ functions:
       - sns:
           arn: !Ref fgaAttemptAddTopic
           topicName: AttemptFlickrGroupAdd
-  api-have-flickr-creds:
-    handler: fga_rest_api_handler.have_flickr_creds
+  api-get-flickr-id:
+    handler: fga_rest_api_handler.get_flickr_id
     vpc: ~
     events:
       - httpApi:
-          path: /api/v001/flickr_creds
+          path: /api/v001/flickr_id
           method: get
+          authorizer:
+            name: fgaJwtAuthorizer
+
+  api-put-flickr-id:
+    handler: fga_rest_api_handler.put_flickr_id
+    vpc: ~
+    events:
+      - httpApi:
+          path: /api/v001/flickr_id
+          method: put
           authorizer:
             name: fgaJwtAuthorizer
 

@@ -255,16 +255,49 @@ def create_new_fga_request(event, context):
     return response
 
 
-def have_flickr_creds( event, context):
+def get_flickr_id( event, context):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
     try:
         cognito_user_id = _get_cognito_user_id_from_event( event ) 
         logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
 
-        have_flickr_creds = _get_flickr_user_creds( cognito_user_id ) is not None
+        flickr_creds = _get_flickr_user_creds( cognito_user_id ) 
 
-        response_body = { "have_flickr_creds": have_flickr_creds } 
+        if flickr_creds is not None:
+
+            response_body = { 
+                "username"      : flickr_creds['username'],
+                "user_nsid"     : flickr_creds['user_nsid'],
+            } 
+            response = _create_apigw_http_response( 200, response_body )
+
+        else:
+            response = _create_apigw_http_response( 404, None )
+
+
+    except Exception as e:
+        # If we are in debug mode, go ahead and raise the exception to give a nice
+        #       stack trace for troubleshooting
+        if logging_level == logging.DEBUG:
+            raise e
+        else:
+            logger.critical("Unhandled exception caught at top level, bailing: " + str(e) )
+            response = _create_apigw_http_response( 500, None )
+
+    return response
+
+
+def put_flickr_id( event, context ):
+    logger.debug( json.dumps( event, indent=4, sort_keys=True) )
+
+    try:
+        cognito_user_id = _get_cognito_user_id_from_event( event )
+        logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
+
+        auth_url = "https://flickr.com/123456" 
+
+        response_body = { "flickr_auth_url": auth_url }
         response = _create_apigw_http_response( 200, response_body )
 
 
