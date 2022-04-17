@@ -408,6 +408,41 @@ def put_flickr_id( event, context ):
 
 
 
+def _get_perms_granted_callback_state( oauth_token ):
+    logger.debug( f"Requested to retrieve state for Flickr perms granted callback for oauth_token {oauth_token}" )
+
+    dynamodb_handle = _get_dynamodb_table_handle()
+
+    try:
+        dynamo_response = dynamodb_handle.get_item(
+            Key={
+                'PK'    : f"oauth_token_{oauth_token}",
+                'SK'    : "flickr_permissions_granted_callback_state",
+            }
+        )
+
+        logger.info( f"Successful DynamoDB pull for oauth_token {oauth_token}" )
+
+        if dynamo_response is not None and 'Item' in dynamo_response:
+            return_state = {
+                'oauth_secret'      : dynamo_response['Item']['oauth_secret'],
+                'cognito_user_id'   : dynamo_response['Item']['cognito_user_id'],
+            }
+        else:
+            return_state = None
+
+    except botocore.exceptions.ClientError as e:
+        error_msg = e.response['Error']['Message']
+
+        logger.error( f"Exception thrown when trying to get perms granted callback state for oauth token {oauth_token}, error message: {error_msg}" )
+        if logging_level == logging.DEBUG:
+            raise e
+        else:
+            return_state = None
+
+    return return_state 
+
+
 def user_permission_granted_callback( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
@@ -418,24 +453,36 @@ def user_permission_granted_callback( event, context ):
                 and 'oauth_token' in event['queryStringParameters'] \
                 and 'oauth_verifier' in event['queryStringParameters']:
 
+            # Pull our callback state from dynamo
+
             flickr_oauth_data = {
                 'oauth_token'       : event['queryStringParameters']['oauth_token'],
                 'oauth_verifier'    :  event['queryStringParameters']['oauth_verifier']
             }
 
-            # Sadly can't use the flickrapi wrapper because it can't handle coming in with
-            #       no state. Stealing some code from them to fill in the gaps
+            # Pull our callback state from dynamo, keyed by oauth_token
+            perms_granted_callback_state = _get_perms_granted_callback_state(
+                flickr_oauth_data['oauth_token'] )
 
-            flickr_app_creds = _get_flickr_app_creds()
+            if perms_granted_callback_state is None:
+                response = _create_apigw_http_response( 400, 
+                    {
+                        "error": f"Invalid perms callback invocation, no callback state found for oauth_token {flickr_oauth_data['oauth_token']}" 
+                    }
+                )
+            else:
 
-            logger.debug("Flickr App Creds:")
-            logger.debug( json.dumps(flickr_app_creds, indent=4, sort_keys=True) )
+                flickr_app_creds = _get_flickr_app_creds()
 
-            response = _create_apigw_http_response( 200, 
-                { 
-                    "oauth_data"            : flickr_oauth_data,
-                }
-            )
+                logger.debug("Flickr App Creds:")
+                logger.debug( json.dumps(flickr_app_creds, indent=4, sort_keys=True) )
+
+                response = _create_apigw_http_response( 200, 
+                    { 
+                        "oauth_params"  : flickr_oauth_data,
+                        "db_state"      : perms_granted_callback_state,
+                    }
+                )
 
         else:
             response = _create_apigw_http_response( 400, 
