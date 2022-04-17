@@ -1,5 +1,6 @@
 import json
 import boto3
+import botocore.exceptions
 import logging
 import datetime
 import psycopg2
@@ -7,6 +8,10 @@ import uuid
 import os
 import flickrapi
 import flickrapi.auth
+import requests
+import requests_oauthlib
+import urllib
+import time
 
 
 logging_level = logging.DEBUG
@@ -19,7 +24,6 @@ sns = boto3.client('sns', region_name='us-east-2' )
 
 
 def _create_apigw_http_response( http_status_code, json_body, additional_headers = None ):
-    # Fucking CORS is fucking me again. This isn't showing up in our responses
     return_headers = {
         'Content-Type'                          : 'application/json',
         'Access-Control-Allow-Origin'           : '*',
@@ -84,8 +88,7 @@ def _get_flickr_app_creds():
 
 
 def _get_flickr_user_perms_granted_callback():
-    return _read_value_from_ssm( "/flickrgroupaddr/resources/flickr/user-permission-granted-callback" )
-
+    return _read_value_from_ssm( "/flickrgroupaddr/resources/flickr/user-permission-granted-callback" ) 
 
 def _generate_postgres_db_handle( pgsql_creds ):
     #logger.debug( "Attempting DB connect" )
@@ -298,6 +301,50 @@ def get_flickr_id( event, context):
     return response
 
 
+def _get_dynamodb_table_handle(): 
+    table_name = "flickrgroupaddr"
+    endpoint_region = "us-east-2"
+
+    # Make the connection
+    try:
+        table_handle = boto3.resource(
+            'dynamodb', region_name=endpoint_region).Table( table_name )
+    except e:
+        logger.critical("Could not establish handle to DynamoDB table {0}".format(table_name) )
+
+    return table_handle
+
+
+def _store_flickr_perms_callback_state_in_dynamo( cognito_user_id, oauth_token, oauth_secret ):
+    logger.debug( f"Requested to store state for Flickr perms granted callback in dynamo DB" )
+
+    dynamodb_handle = _get_dynamodb_table_handle()
+
+    try:
+        # Compute unix timestamp ten mins from now
+        ten_mins_in_seconds = 600
+        ttl_value = int( time.time() ) + ten_mins_in_seconds
+
+        dynamodb_handle.put_item(
+            Item={
+                'PK'                : f"oauth_token_{oauth_token}",
+                'SK'                : "flickr_permissions_granted_callback_state",
+                'cognito_user_id'   : cognito_user_id,
+                'oauth_secret'      : oauth_secret,
+                'ttl'               : ttl_value,
+            }
+        )
+
+        logger.info( f"State for Flickr perms granted callback stored for oauth_token {oauth_token}: oauth_secret = {oauth_secret}, user cognito id = {cognito_user_id}, ttl = {ttl_value} (10 mins from now)" )
+
+    except botocore.exceptions.ClientError as e:
+        error_msg = e.response['Error']['Message']
+
+        logger.error( f"Exception thrown when trying to add perms granted callback state, response: {error_msg}" )
+        if logging_level == logging.DEBUG:
+            raise e
+
+
 def put_flickr_id( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
@@ -307,6 +354,9 @@ def put_flickr_id( event, context ):
 
         flickr_app_creds = _get_flickr_app_creds()
 
+        logger.debug("Flickr App Creds:")
+        logger.debug( json.dumps(flickr_app_creds, indent=4, sort_keys=True) )
+
         flickr = flickrapi.FlickrAPI(
             flickr_app_creds['api_key'],
             flickr_app_creds['api_key_secret'],
@@ -314,9 +364,32 @@ def put_flickr_id( event, context ):
 
         permissions_granted_callback_url = _get_flickr_user_perms_granted_callback()
 
+        logger.debug( f"Permissions granted callback: {permissions_granted_callback_url}" )
+
+        if permissions_granted_callback_url is None:
+            logger.warn("Having to manual overwrite callback but I'm bored" )
+            permissions_granted_callback_url = "https://x4etaszxrl.execute-api.us-east-2.amazonaws.com/api/v001/flickr/user-permission-granted-callback"
+
         flickr.get_request_token(oauth_callback=permissions_granted_callback_url)
 
         auth_url = flickr.auth_url( perms='write' )
+
+        # Extract the oauth_token from the generated URL we're about to bounce the user
+        # to
+        parsed_url = urllib.parse.urlparse( auth_url )
+        oauth_token = urllib.parse.parse_qs( parsed_url.query )['oauth_token'][0]
+        logger.debug( f"OAuth token: {oauth_token}" )
+
+        # Rudely reach in without accessors (as the flickrapi API doesn't expose a function to
+        #       get it) and pull out the oauth_secret from the data returned by the request 
+        #       token call. 
+        #
+        #       This data needs to be stored in dynamo for the resulting perms callback to get
+        #       the state needed to get a Flickr access_token
+        oauth_secret = flickr.flickr_oauth.oauth.client.resource_owner_secret
+        logger.debug( f"OAuth secret: {oauth_secret}" )
+
+        _store_flickr_perms_callback_state_in_dynamo( cognito_user_id, oauth_token, oauth_secret )
 
         response_body = { "flickr_auth_url": auth_url }
         response = _create_apigw_http_response( 200, response_body )
@@ -339,7 +412,39 @@ def user_permission_granted_callback( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
     try:
-        response =  _create_apigw_http_response( 204, None )
+        #response =  _create_apigw_http_response( 200, event )
+        # Pull the two parameters that we should have
+        if 'queryStringParameters' in event \
+                and 'oauth_token' in event['queryStringParameters'] \
+                and 'oauth_verifier' in event['queryStringParameters']:
+
+            flickr_oauth_data = {
+                'oauth_token'       : event['queryStringParameters']['oauth_token'],
+                'oauth_verifier'    :  event['queryStringParameters']['oauth_verifier']
+            }
+
+            # Sadly can't use the flickrapi wrapper because it can't handle coming in with
+            #       no state. Stealing some code from them to fill in the gaps
+
+            flickr_app_creds = _get_flickr_app_creds()
+
+            logger.debug("Flickr App Creds:")
+            logger.debug( json.dumps(flickr_app_creds, indent=4, sort_keys=True) )
+
+            response = _create_apigw_http_response( 200, 
+                { 
+                    "oauth_data"            : flickr_oauth_data,
+                }
+            )
+
+        else:
+            response = _create_apigw_http_response( 400, 
+                {
+                    "error"     : "callback did not include oauth token/verifier" 
+                }
+            )
+
+
 
     except Exception as e:
         # If we are in debug mode, go ahead and raise the exception to give a nice

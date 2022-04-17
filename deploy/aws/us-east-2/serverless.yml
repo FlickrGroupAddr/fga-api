@@ -38,6 +38,12 @@ provider:
           Action:
             - "SNS:Publish"
           Resource: !Ref fgaAttemptAddTopic
+        - Effect: "Allow"
+          Action:
+            - "dynamodb:PutItem"
+            - "dynamodb:GetItem"
+            - "dynamodb:Query" 
+          Resource: "arn:aws:dynamodb:us-east-2:293119271420:table/flickrgroupaddr"
 
   httpApi:
     cors: 
@@ -110,7 +116,8 @@ resources:
     fgaAttemptAddTopic:
       Type: AWS::SNS::Topic
       Properties:
-        TopicName: AttemptFlickrGroupAdd
+        TopicName: AttemptFlickrGroupAdd    
+    # Should have made DynamoDB a resource?
 
 constructs:
   add-attempt-queue:
