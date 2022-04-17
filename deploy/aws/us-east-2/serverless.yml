@@ -75,6 +75,7 @@ functions:
       - sns:
           arn: !Ref fgaAttemptAddTopic
           topicName: AttemptFlickrGroupAdd
+
   api-get-flickr-id:
     handler: fga_rest_api_handler.get_flickr_id
     vpc: ~
@@ -94,6 +95,27 @@ functions:
           method: put
           authorizer:
             name: fgaJwtAuthorizer
+
+  api-get-picture-info:
+    handler: fga_rest_api_handler.get_flickr_picture_info
+    vpc: ~
+    events:
+      - httpApi:
+          path: /api/v001/flickr/picture
+          method: get
+          authorizer:
+            name: fgaJwtAuthorizer
+
+  api-get-user-info:
+    handler: fga_rest_api_handler.get_flickr_user_info
+    vpc: ~
+    events:
+      - httpApi:
+          path: /api/v001/flickr/user
+          method: get
+          authorizer:
+            name: fgaJwtAuthorizer
+
 
   oauth-callback:
     handler: cognito-oauth-callback.cognito_oauth_callback_webui_dev

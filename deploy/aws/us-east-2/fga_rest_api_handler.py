@@ -572,3 +572,57 @@ def user_permission_granted_callback( event, context ):
             response = _create_apigw_http_response( 500, None )
 
     return response
+
+
+
+def get_flickr_picture_info( event, context ):
+    logger.debug( json.dumps( event, indent=4, sort_keys=True) )
+
+    try:
+        cognito_user_id = _get_cognito_user_id_from_event( event )
+        logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
+
+        response_status_code = 200
+        response_body = {
+            "flickr_groups": [],
+        }
+        response = _create_apigw_http_response( response_status_code, response_body )
+    
+
+    except Exception as e:
+        # If we are in debug mode, go ahead and raise the exception to give a nice
+        #       stack trace for troubleshooting
+        if logging_level == logging.DEBUG:
+            raise e
+        else:
+            logger.critical("Unhandled exception caught at top level, bailing: " + str(e) )
+            response = _create_apigw_http_response( 500, None )
+
+    return response
+
+
+def get_flickr_user_info( event, context ):
+    logger.debug( json.dumps( event, indent=4, sort_keys=True) )
+
+    try:
+        cognito_user_id = _get_cognito_user_id_from_event( event )
+        logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
+
+        response_status_code = 200
+        response_body = {
+            "user_flickr_groups": [],
+        }
+        response = _create_apigw_http_response( response_status_code, response_body )
+
+
+    except Exception as e:
+        # If we are in debug mode, go ahead and raise the exception to give a nice
+        #       stack trace for troubleshooting
+        if logging_level == logging.DEBUG:
+            raise e
+        else:
+            logger.critical("Unhandled exception caught at top level, bailing: " + str(e) )
+            response = _create_apigw_http_response( 500, None )
+
+    return response
+
