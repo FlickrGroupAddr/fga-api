@@ -24,10 +24,9 @@ sns = boto3.client('sns', region_name='us-east-2' )
 
 
 def _create_apigw_http_response( http_status_code, json_body, additional_headers = None ):
+    # Don't need CORS headers -- serverless is taking care of this if the origin matches
     return_headers = {
         'Content-Type'                          : 'application/json',
-        'Access-Control-Allow-Origin'           : '*',
-        #'Access-Control-Allow-Credentials'     : True,
     }
 
     if additional_headers:
@@ -36,7 +35,7 @@ def _create_apigw_http_response( http_status_code, json_body, additional_headers
     return_dict = {
         "statusCode"    : http_status_code,
         "body"          : json.dumps( json_body, indent=4, sort_keys=True ), 
-        #"headers"       : return_headers,
+        "headers"       : return_headers,
     }
 
     return return_dict
@@ -542,10 +541,16 @@ def user_permission_granted_callback( event, context ):
 
                     _store_user_access_token( cognito_user_id, access_token )
 
-                    response = _create_apigw_http_response( 200, 
-                        { 
-                            "access_token"  : access_token,
-                        }
+                    additional_headers = {
+                        'location'  : 'https://flickrgroupaddr.com/console',
+                    }
+
+                    response_status_code = 302
+                    response_body = None
+                    response = _create_apigw_http_response( 
+                        response_status_code,
+                        response_body,
+                        additional_headers = additional_headers
                     )
 
         else:
