@@ -418,7 +418,9 @@ def _get_perms_granted_callback_state( oauth_token ):
             Key={
                 'PK'    : f"oauth_token_{oauth_token}",
                 'SK'    : "flickr_permissions_granted_callback_state",
-            }
+            },
+
+            ConsistentRead=True
         )
 
         logger.info( f"Successful DynamoDB pull for oauth_token {oauth_token}" )
@@ -446,6 +448,19 @@ def _get_perms_granted_callback_state( oauth_token ):
 def _get_flickr_access_token_endpoint_url():
     # TODO: change this to SSM
     return "https://www.flickr.com/services/oauth/access_token"
+
+
+def _store_user_access_token( cognito_user_id, flickr_access_token ):
+    param_store_key = f"/flickrgroupaddr/user/{cognito_user_id}/secrets/flickr"
+
+    ssm.put_parameter(
+        Name        = param_store_key,
+        Value       = json.dumps( flickr_access_token, indent=4, sort_keys=True ),
+        Type        = "String",
+
+        # Find to allow overwrite, they may have re-authed
+        Overwrite   = True
+    )
 
 
 def user_permission_granted_callback( event, context ):
@@ -516,9 +531,20 @@ def user_permission_granted_callback( event, context ):
 
                     logger.debug( f"Access token content for Cognito user {cognito_user_id}:\n{access_token_response.content}" )
 
+                    character_encoding = 'utf-8'
+                    access_token_string_uri_encoded = access_token_response.content.decode( 
+                        character_encoding )
+                    #parsed_access_token = urllib.parse.urlparse( auth_url )
+                    access_token = urllib.parse.parse_qs( access_token_string_uri_encoded )
+
+                    for curr_key in access_token:
+                        access_token[curr_key] = access_token[curr_key][0]
+
+                    _store_user_access_token( cognito_user_id, access_token )
+
                     response = _create_apigw_http_response( 200, 
                         { 
-                            "access_token_content"  : access_token_response.content,
+                            "access_token"  : access_token,
                         }
                     )
 
