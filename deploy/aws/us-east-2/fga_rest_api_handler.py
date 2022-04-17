@@ -443,6 +443,11 @@ def _get_perms_granted_callback_state( oauth_token ):
     return return_state 
 
 
+def _get_flickr_access_token_endpoint_url():
+    # TODO: change this to SSM
+    return "https://www.flickr.com/services/oauth/access_token"
+
+
 def user_permission_granted_callback( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
@@ -477,12 +482,45 @@ def user_permission_granted_callback( event, context ):
                 logger.debug("Flickr App Creds:")
                 logger.debug( json.dumps(flickr_app_creds, indent=4, sort_keys=True) )
 
-                response = _create_apigw_http_response( 200, 
-                    { 
-                        "oauth_params"  : flickr_oauth_data,
-                        "db_state"      : perms_granted_callback_state,
-                    }
-                )
+                # Create the oauth1 object that will be used to get us our access token
+                api_key         = flickr_app_creds['api_key']
+                api_secret      = flickr_app_creds['api_key_secret']
+                oauth_token     = flickr_oauth_data['oauth_token']
+                oauth_secret    = perms_granted_callback_state['oauth_secret']
+                verifier        = flickr_oauth_data['oauth_verifier']
+                
+                oauth_obj =  requests_oauthlib.OAuth1(
+                    client_key              = api_key,
+                    client_secret           = api_secret,
+                    resource_owner_key      = oauth_token,
+                    resource_owner_secret   = oauth_secret,
+                    verifier                = verifier )
+
+                access_token_endpoint_url = _get_flickr_access_token_endpoint_url()
+
+                access_token_response = requests.post( access_token_endpoint_url, auth = oauth_obj )
+
+                if access_token_response.status_code != 200:
+                    logger.error( f"Non-200 status code {access_token_response.status_code} returned" )
+
+                    response = _create_apigw_http_response( 500, 
+                        {
+                            "error": "request for access token was rejected by flickr"
+                        }
+                    )
+
+                else:
+                    logger.info( "Got a valid access token back from Flickr!" ) 
+
+                    cognito_user_id = perms_granted_callback_state['cognito_user_id']
+
+                    logger.debug( f"Access token content for Cognito user {cognito_user_id}:\n{access_token_response.content}" )
+
+                    response = _create_apigw_http_response( 200, 
+                        { 
+                            "access_token_content"  : access_token_response.content,
+                        }
+                    )
 
         else:
             response = _create_apigw_http_response( 400, 
