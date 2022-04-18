@@ -574,19 +574,115 @@ def user_permission_granted_callback( event, context ):
     return response
 
 
+def _create_flickr_api_handle_for_user( user_flickr_auth_info ):
+
+    app_flickr_api_key_info = _get_flickr_app_creds()
+
+    # Create an OAuth User Token that flickr API library understands
+    api_access_level = "write"
+    flickrapi_user_token = flickrapi.auth.FlickrAccessToken(
+        user_flickr_auth_info['oauth_token'],
+        user_flickr_auth_info['oauth_token_secret'],
+        api_access_level,
+        user_flickr_auth_info['fullname'],
+        user_flickr_auth_info['username'],
+        user_flickr_auth_info['user_nsid'])
+
+    flickrapi_handle = flickrapi.FlickrAPI(app_flickr_api_key_info['api_key'],
+                                           app_flickr_api_key_info['api_key_secret'],
+                                           token=flickrapi_user_token,
+                                           store_token=False,
+                                           format='parsed-json')
+
+    return flickrapi_handle
+
+
+def _get_picture_groups( flickrapi_handle, photo_id ):
+    pic_contexts = flickrapi_handle.photos.getAllContexts( photo_id=photo_id )
+
+    #print( "Contexts:\n" + json.dumps(pic_contexts, indent=4, sort_keys=True))
+    logger.debug( f"Contexts for pic {photo_id}" )
+    logger.debug( json.dumps(pic_contexts, indent=4, sort_keys=True) )
+    group_memberships = {}
+
+    # "Sets" are albums, "pools" are groups
+    if 'pool' in pic_contexts:
+        for curr_group in pic_contexts['pool']:
+            group_memberships[ curr_group['id'] ] = curr_group
+ 
+    response = _create_apigw_http_response( 200, 
+        {
+            "groups_for_pic": group_memberships 
+        }
+    )
+
+    return response
+
+
 
 def get_flickr_picture_info( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
+
+    # Make sure we have the parameters we need
+    if 'queryStringParameters' in event \
+            and all( key in event['queryStringParameters'] \
+            for key in ('flickr_photo_id', 'query_type') ):
+
+        photo_id    = event['queryStringParameters']['flickr_photo_id']
+        query_type  = event['queryStringParameters']['query_type']
+
+        supported_query_types = {
+            'picture_groups': _get_picture_groups,       # Get the groups the pic is in
+        }
+
+
+        # Is is a query type we know about
+        if query_type not in supported_query_types:
+            response = _create_apigw_http_response( 400,
+                {
+                    "error": "unsupported query_type"
+                }
+            )
+            return response
+
+    else:
+        logger.error("Caller did not provide all the context we need")
+        response = _create_apigw_http_response( 400, 
+            {
+                "error": "missing query string parameters"
+            }
+        )
+        return response
 
     try:
         cognito_user_id = _get_cognito_user_id_from_event( event )
         logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
 
-        response_status_code = 200
-        response_body = {
-            "flickr_groups": [],
-        }
-        response = _create_apigw_http_response( response_status_code, response_body )
+        # If they have Flickr creds, pull them
+        user_flickr_token = _get_flickr_user_creds( cognito_user_id )
+
+        if user_flickr_token is not None:
+
+            logger.debug( "User has a valid flickr token" )
+
+            flickrapi_handle = _create_flickr_api_handle_for_user( user_flickr_token )
+
+            logger.debug( "Created API handle that can act on behalf of this user" )
+
+            # Contexts are the groups that the pic is in
+            response = supported_query_types[ query_type ]( flickrapi_handle, photo_id )
+
+            logger.debug( "Got response from helper:")
+            logger.debug( json.dumps(response, indent=4, sort_keys=True) )
+
+        else:
+            # How the fuck did we get here?
+            # This endpoint shouldn't be reachable if they don't have flickr creds
+            response = _create_apigw_http_response( 400, 
+                {
+                    "error": "user requested info about a picture, but they don't have stored flickr creds" 
+                }
+            )
     
 
     except Exception as e:
@@ -601,19 +697,96 @@ def get_flickr_picture_info( event, context ):
     return response
 
 
+def _get_user_groups( flickrapi_handle ):
+    user_groups = flickrapi_handle.groups.pools.getGroups()
+
+    logger.debug( "Groups for this user" )
+    logger.debug( json.dumps(user_groups, indent=4, sort_keys=True) )
+    group_memberships = {}
+
+    if 'groups' in user_groups and 'group' in user_groups['groups']:
+        for curr_group in user_groups['groups']['group']:
+            #print("Processing group:\n" + json.dumps(curr_group, indent=4, sort_keys=True) )
+            if 'id' in curr_group:
+                group_memberships[curr_group['id']] = curr_group
+
+    response = _create_apigw_http_response( 200,
+        {
+            "user_flickr_groups": group_memberships
+        }
+    )
+
+    return response
+
+
+
 def get_flickr_user_info( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
+
+    # Make sure we have the parameters we need
+    if 'queryStringParameters' in event \
+            and all( key in event['queryStringParameters'] \
+            for key in ('query_type', ) ):
+
+        query_type  = event['queryStringParameters']['query_type']
+
+        supported_query_types = {
+            'user_groups': _get_user_groups,       # Get the groups the user is in
+        }
+
+
+        # Is is a query type we know about
+        if query_type not in supported_query_types:
+            response = _create_apigw_http_response( 400,
+                {
+                    "error": "unsupported query_type"
+                }
+            )
+            return response
+
+    else:
+        logger.error("Caller did not provide all the context we need")
+        response = _create_apigw_http_response( 400,
+            {
+                "error": "missing query string parameters"
+            }
+        )
+        return response
+
 
     try:
         cognito_user_id = _get_cognito_user_id_from_event( event )
         logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
 
-        response_status_code = 200
-        response_body = {
-            "user_flickr_groups": [],
-        }
-        response = _create_apigw_http_response( response_status_code, response_body )
+        # If they have Flickr creds, pull them
+        user_flickr_token = _get_flickr_user_creds( cognito_user_id )
 
+        if user_flickr_token is not None:
+            logger.debug( "User has a valid flickr token" )
+
+            flickrapi_handle = _create_flickr_api_handle_for_user( user_flickr_token )
+
+            logger.debug( "Created API handle that can act on behalf of this user" )
+
+            # Contexts are the groups that the pic is in
+            response = supported_query_types[ query_type ]( flickrapi_handle )
+
+            logger.debug( "Got response from helper:")
+            logger.debug( json.dumps(response, indent=4, sort_keys=True) )
+
+
+        else:
+            # How the fuck did we get here?
+            # This endpoint shouldn't ever be hit if they don't have flickr creds
+            #   (Someone fuzzing our API?)
+            response = _create_apigw_http_response( 400,
+                {
+                    "error": "user requested info about a user, but they don't have stored flickr creds"
+                }
+            )
+
+
+        return response
 
     except Exception as e:
         # If we are in debug mode, go ahead and raise the exception to give a nice
