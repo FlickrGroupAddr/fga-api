@@ -771,9 +771,8 @@ def get_flickr_user_info( event, context ):
             # Contexts are the groups that the pic is in
             response = supported_query_types[ query_type ]( flickrapi_handle )
 
-            logger.debug( "Got response from helper:")
-            logger.debug( json.dumps(response, indent=4, sort_keys=True) )
-
+            #logger.debug( "Got response from helper:")
+            #logger.debug( json.dumps(response, indent=4, sort_keys=True) )
 
         else:
             # How the fuck did we get here?
@@ -784,7 +783,6 @@ def get_flickr_user_info( event, context ):
                     "error": "user requested info about a user, but they don't have stored flickr creds"
                 }
             )
-
 
         return response
 
@@ -798,4 +796,3 @@ def get_flickr_user_info( event, context ):
             response = _create_apigw_http_response( 500, None )
 
     return response
-
