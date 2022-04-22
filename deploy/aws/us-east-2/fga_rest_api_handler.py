@@ -622,7 +622,29 @@ def _get_picture_groups( flickrapi_handle, photo_id ):
 
 def _do_group_add( queryStringParameters ):
     logger.debug( "Made it inside do_group_add" )
-    response = _create_apigw_http_response( 204, None )
+
+    # Make sure we have all our other required params
+    required_params = ( 'flickr_photo_id', 'flickr_group_id' )
+
+    if all( key in queryStringParameters for key in required_params ):
+        photo_id        = queryStringParameters['flickr_photo_id']
+        group_id        = queryStringParameters['flickr_group_id']
+
+        logger.info( 
+            f"Received request to add photo {photo_id} to group {group_id}" )
+
+        response = _create_apigw_http_response( 204, None )
+
+
+    else:
+        logger.warn( "Missing required param for add: " + \
+            json.dumps(queryStringParameters, indent=4, sort_keys=True) )
+
+        response = _create_apigw_http_response( 400, 
+            {
+                "error"     : "missing required param for group add" 
+            }
+        )
 
     return response
 
@@ -645,7 +667,8 @@ def update_picture( event, context ):
 
         if query_type in known_query_types:
             logger.debug("query type is known, calling helper")
-            response = known_query_types( event['queryStringParameters'] )
+            response = known_query_types[ query_type ](
+                event['queryStringParameters'] ) 
         else:
             logger.warn("query type not known" )
             response = _create_apigw_http_response( 400,
