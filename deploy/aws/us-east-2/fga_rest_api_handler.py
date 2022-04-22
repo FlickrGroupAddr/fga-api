@@ -620,11 +620,49 @@ def _get_picture_groups( flickrapi_handle, photo_id ):
 
 
 
+def _do_group_add( queryStringParameters ):
+    logger.debug( "Made it inside do_group_add" )
+    response = _create_apigw_http_response( 204, None )
+
+    return response
+
+
 def update_picture( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
-    return _create_apigw_http_response( 204, None )
+    # Make sure we have the parameters we need
+    if 'queryStringParameters' in event \
+            and 'query_type' in event['queryStringParameters']:
+        query_type = event['queryStringParameters']['query_type']
 
+        logger.debug(f"Found query type: {query_type}")
+
+        # Is it a known query type?
+        known_query_types = {
+            'group_add':   _do_group_add,
+
+        }
+
+        if query_type in known_query_types:
+            logger.debug("query type is known, calling helper")
+            response = known_query_types( event['queryStringParameters'] )
+        else:
+            logger.warn("query type not known" )
+            response = _create_apigw_http_response( 400,
+                {
+                    "error": "unsupported query_type"
+                }
+            )
+
+    else:
+        logger.warn("Got an update request with no query_type" )
+        response = _create_apigw_http_response( 400,
+            {
+                "Invalid format; no query_type parameter"
+            }
+        )
+
+    return response
 
 
 def get_flickr_picture_info( event, context ):
