@@ -106,6 +106,16 @@ functions:
           authorizer:
             name: fgaJwtAuthorizer
 
+  api-update-picture:
+    handler: fga_rest_api_handler.update_picture
+    events:
+      - httpApi:
+          path: /api/v001/flickr/picture
+          method: put
+          authorizer:
+            name: fgaJwtAuthorizer
+
+ 
   api-get-user-info:
     handler: fga_rest_api_handler.get_flickr_user_info
     vpc: ~

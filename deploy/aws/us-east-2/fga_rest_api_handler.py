@@ -620,6 +620,13 @@ def _get_picture_groups( flickrapi_handle, photo_id ):
 
 
 
+def update_picture( event, context ):
+    logger.debug( json.dumps( event, indent=4, sort_keys=True) )
+
+    return _create_apigw_http_response( 204, None )
+
+
+
 def get_flickr_picture_info( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
 
