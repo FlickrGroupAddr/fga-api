@@ -633,6 +633,14 @@ def _do_group_add( event ):
         pgsql_creds = _get_postgresql_creds()
         logger.debug( "Got PostgreSQL creds" )
 
+
+        # By using these two "with" statements on Postgres, if we exit them without having thrown an exception,
+        #       we get an auto commit
+        with _generate_postgres_db_handle( pgsql_creds ) as db_handle:
+            with db_handle.cursor() as db_cursor:
+                pass
+
+
         response = _create_apigw_http_response( 204, None )
 
     else:
