@@ -638,7 +638,23 @@ def _do_group_add( event ):
         #       we get an auto commit
         with _generate_postgres_db_handle( pgsql_creds ) as db_handle:
             with db_handle.cursor() as db_cursor:
-                pass
+                add_attempt_guid    = str( uuid.uuid4() )
+                user_cognito_id     = event[ 'requestContext']['authorizer']['jwt']['claims']['sub']
+                current_timestamp   = datetime.datetime.now( datetime.timezone.utc )
+
+                sql_command = """ 
+                    INSERT INTO submitted_requests (uuid_pk, flickr_user_cognito_id, picture_flickr_id, flickr_group_id,
+                        request_datetime)
+                    VALUES ( %s, %s, %s, %s, %s );
+                """
+
+                sql_params = (
+                    add_attempt_guid,
+                    user_cognito_id,
+                    photo_id,
+                    group_id,
+                    current_timestamp )
+ 
 
 
         response = _create_apigw_http_response( 204, None )
