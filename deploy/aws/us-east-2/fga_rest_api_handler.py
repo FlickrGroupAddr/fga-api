@@ -655,6 +655,18 @@ def _do_group_add( event ):
                     group_id,
                     current_timestamp )
  
+                try:
+                    db_cursor.execute( sql_command, sql_params )
+
+                    response = _create_apigw_http_response( 204, None )
+
+                    logging.info( f"Successful request, added to DB, assigned GUID {add_attempt_guid}" )
+
+                    # If we didn't throw an exception on DB add, try SNS
+                    # notification
+                    _do_sns_notify( user_cognito_id, photo_id, group_id, add_attempt_guid )
+                except:
+                    logger.warn("Exception thrown")
 
 
         response = _create_apigw_http_response( 204, None )
