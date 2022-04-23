@@ -108,7 +108,7 @@ def _get_flickr_user_creds( user_cognito_id ):
     return _read_value_from_ssm( f"/flickrgroupaddr/user/{user_cognito_id}/secrets/flickr" )
 
 
-def _do_sns_notify( api_request, success_body ):
+def _do_sns_notify( user_cognito_id, flickr_photo_id, flickr_group_id, request_guid ):
     logger.debug( "Starting SNS notification due to successful DB insert" )
 
     # let's see if the attempt to store the ARN of the generated SNS topic by serverless in env var worked
@@ -116,15 +116,10 @@ def _do_sns_notify( api_request, success_body ):
     if sns_topic_arn:
         logger.debug( f"SNS Topic ARN was found in env vars: {sns_topic_arn}, sending notification" )
         try:
-            request_guid        = json.loads( success_body )['fga_request_guid']
-            user_cognito_id     = api_request['user_cognito_id']
-            flickr_picture_id   = api_request['flickr_picture_id']
-            flickr_group_id     = api_request['flickr_group_id']
-
             sns_notification = {
   	            "user_submitted_request_id"     : request_guid,
 	            "user_cognito_id"               : user_cognito_id,
-	            "flickr_picture_id"             : flickr_picture_id,
+	            "flickr_picture_id"             : flickr_photo_id,
 	            "flickr_group_id"               : flickr_group_id,
             }
 
@@ -158,7 +153,7 @@ def _process_api_request( api_request ):
     return response
 
 
-def _do_db_insert( api_request ):
+def _do_db_group_add( photo_id, group_id ):
     flickr_creds_user = _get_flickr_user_creds( api_request['user_cognito_id'] )
     if not flickr_creds_user:
         logger.warn( f"Could not find flickr creds for Cognito user ID \"{api_request['user_cognito_id']}\", bailing" )
@@ -620,11 +615,13 @@ def _get_picture_groups( flickrapi_handle, photo_id ):
 
 
 
-def _do_group_add( queryStringParameters ):
+def _do_group_add( event ):
     logger.debug( "Made it inside do_group_add" )
 
     # Make sure we have all our other required params
     required_params = ( 'flickr_photo_id', 'flickr_group_id' )
+
+    queryStringParameters = event['queryStringParameters']
 
     if all( key in queryStringParameters for key in required_params ):
         photo_id        = queryStringParameters['flickr_photo_id']
@@ -633,8 +630,10 @@ def _do_group_add( queryStringParameters ):
         logger.info( 
             f"Received request to add photo {photo_id} to group {group_id}" )
 
-        response = _create_apigw_http_response( 204, None )
+        pgsql_creds = _get_postgresql_creds()
+        logger.debug( "Got PostgreSQL creds" )
 
+        response = _create_apigw_http_response( 204, None )
 
     else:
         logger.warn( "Missing required param for add: " + \
@@ -667,8 +666,7 @@ def update_picture( event, context ):
 
         if query_type in known_query_types:
             logger.debug("query type is known, calling helper")
-            response = known_query_types[ query_type ](
-                event['queryStringParameters'] ) 
+            response = known_query_types[ query_type ]( event )
         else:
             logger.warn("query type not known" )
             response = _create_apigw_http_response( 400,
