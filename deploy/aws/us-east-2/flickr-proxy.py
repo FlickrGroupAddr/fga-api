@@ -80,10 +80,10 @@ def _create_flickr_api_handle( app_flickr_api_key_info, user_flickr_auth_info ):
     # Create an OAuth User Token that flickr API library understands
     api_access_level = "write"
     flickrapi_user_token = flickrapi.auth.FlickrAccessToken(
-        user_flickr_auth_info['user_oauth_token'],
-        user_flickr_auth_info['user_oauth_token_secret'],
+        user_flickr_auth_info['oauth_token'],
+        user_flickr_auth_info['oauth_token_secret'],
         api_access_level,
-        user_flickr_auth_info['user_fullname'],
+        user_flickr_auth_info['fullname'],
         user_flickr_auth_info['username'],
         user_flickr_auth_info['user_nsid'])
 

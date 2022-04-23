@@ -665,12 +665,14 @@ def _do_group_add( event ):
                     # If we didn't throw an exception on DB add, try SNS
                     # notification
                     _do_sns_notify( user_cognito_id, photo_id, group_id, add_attempt_guid )
-                except:
-                    logger.warn("Exception thrown")
-
-
-        response = _create_apigw_http_response( 204, None )
-
+                except psycopg2.Error as e:
+                    logging.warn( f"Operation failed, DB exception thrown: {str(e)}" )
+                    response = _create_apigw_http_response(
+                        500,
+                        {
+                            "error"             : "DB exception thrown",
+                        }
+                    )
     else:
         logger.warn( "Missing required param for add: " + \
             json.dumps(queryStringParameters, indent=4, sort_keys=True) )
