@@ -76,6 +76,11 @@ functions:
           arn: !Ref fgaAttemptAddTopic
           topicName: AttemptFlickrGroupAdd
 
+  daily-retry:
+    handler: daily-retry.daily_retry
+    events:
+      - schedule: cron(1 0 * * ? *)
+
   api-get-flickr-id:
     handler: fga_rest_api_handler.get_flickr_id
     vpc: ~
@@ -122,6 +127,15 @@ functions:
     events:
       - httpApi:
           path: /api/v001/flickr/user
+          method: get
+          authorizer:
+            name: fgaJwtAuthorizer
+
+  api-get-user-requests:
+    handler: fga_rest_api_handler.get_user_outstanding_requests
+    events:
+      - httpApi:
+          path: /api/v001/flickr/user/requests
           method: get
           authorizer:
             name: fgaJwtAuthorizer

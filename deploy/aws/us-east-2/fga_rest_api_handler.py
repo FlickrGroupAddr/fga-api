@@ -34,7 +34,7 @@ def _create_apigw_http_response( http_status_code, json_body, additional_headers
 
     return_dict = {
         "statusCode"    : http_status_code,
-        "body"          : json.dumps( json_body, indent=4, sort_keys=True ), 
+        "body"          : json.dumps( json_body, indent=4, sort_keys=True, default=str ), 
         "headers"       : return_headers,
     }
 
@@ -823,6 +823,67 @@ def _get_user_groups( flickrapi_handle ):
     return response
 
 
+def get_user_outstanding_requests( event, context ):
+    logger.debug( json.dumps( event, indent=4, sort_keys=True) )
+
+    cognito_user_id = _get_cognito_user_id_from_event( event )
+    logger.info( f"Authenticated Cognito user: {cognito_user_id}" )
+
+    db_creds = _get_postgresql_creds()
+    with _generate_postgres_db_handle( db_creds ) as db_handle:
+        with db_handle.cursor() as db_cursor:
+            sql_command = """
+                SELECT      submitted_requests.uuid_pk, 
+                            picture_flickr_id,
+                            flickr_group_id,
+                            request_datetime,
+                            attempt_completed,
+                            final_status
+                FROM        submitted_requests
+                LEFT JOIN   group_add_attempts
+                ON          submitted_requests.uuid_pk = 
+                                group_add_attempts.submitted_request_fk
+                WHERE       submitted_requests.flickr_user_cognito_id = %s
+                ORDER BY    request_datetime DESC, 
+                            attempt_completed DESC;
+            """
+
+            sql_params = ( cognito_user_id, )
+
+            db_cursor.execute( sql_command, sql_params )
+
+            retrieved_requests = []
+
+            curr_pk = None
+
+            for curr_row in db_cursor.fetchall():
+                row_pk = curr_row[0]
+                
+                if row_pk != curr_pk:
+                    logger.debug( f"Found new PK: {row_pk}" )
+
+                    row_data = {
+                        "pk"                            : row_pk,
+                        "photo_id"                      : curr_row[1],
+                        "group_id"                      : curr_row[2],
+                        "original_request_timestamp"    : curr_row[3],
+                        "most_recent_attempt"           : curr_row[4],
+                        "most_recent_attempt_status"    : curr_row[5],
+                    }
+
+                    retrieved_requests.append( row_data )
+
+                    curr_pk = row_pk
+
+    response = _create_apigw_http_response( 200, 
+        {
+            "user_requests"     : retrieved_requests 
+        }
+    )
+
+    return response
+
+
 
 def get_flickr_user_info( event, context ):
     logger.debug( json.dumps( event, indent=4, sort_keys=True) )
@@ -835,7 +896,7 @@ def get_flickr_user_info( event, context ):
         query_type  = event['queryStringParameters']['query_type']
 
         supported_query_types = {
-            'user_groups': _get_user_groups,       # Get the groups the user is in
+            'user_groups'           : _get_user_groups,       # Get the groups the user is in
         }
 
 
@@ -867,6 +928,7 @@ def get_flickr_user_info( event, context ):
 
         if user_flickr_token is not None:
             logger.debug( "User has a valid flickr token" )
+
 
             flickrapi_handle = _create_flickr_api_handle_for_user( user_flickr_token )
 
