@@ -120,14 +120,14 @@ functions:
 #          authorizer:
 #            name: fgaJwtAuthorizer
 
-#  api-get-user-requests:
-#    handler: fga_rest_api_handler.get_user_outstanding_requests
-#    events:
-#      - httpApi:
-#          path: /api/v001/flickr/user/requests
-#          method: get
-#          authorizer:
-#            name: fgaJwtAuthorizer
+  api-get-user-requests:
+    handler: fga_rest_api_handler.get_user_outstanding_requests
+    events:
+      - httpApi:
+          path: /api/v001/flickr/user/requests
+          method: get
+          authorizer:
+            name: fgaJwtAuthorizer
 
 
   oauth-callback:
