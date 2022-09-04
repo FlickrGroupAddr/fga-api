@@ -54,20 +54,20 @@ provider:
 
 
 functions:
-#  api-new-request:
-#    handler: fga_rest_api_handler.create_new_fga_request
-#    events:
-#      - httpApi:
-#          path: /api/v001/fga_request
-#          method: post
+  api-new-request:
+    handler: fga_rest_api_handler.create_new_fga_request
+    events:
+      - httpApi:
+          path: /api/v001/fga_request
+          method: post
 
-#  flickr-attempt-add:
-#    handler: flickr-proxy.attempt_flickr_group_add
-#    environment:
-#    events:
-#      - sns:
-#          arn: !Ref fgaAttemptAddTopic
-#          topicName: AttemptFlickrGroupAdd
+  flickr-attempt-add:
+    handler: flickr-proxy.attempt_flickr_group_add
+    environment:
+    events:
+      - sns:
+          arn: !Ref fgaAttemptAddTopic
+          topicName: AttemptFlickrGroupAdd
 
 #  daily-retry:
 #    handler: daily-retry.daily_retry
@@ -101,14 +101,14 @@ functions:
           authorizer:
             name: fgaJwtAuthorizer
 
-#  api-update-picture:
-#    handler: fga_rest_api_handler.update_picture
-#    events:
-#      - httpApi:
-#          path: /api/v001/flickr/picture
-#          method: put
-#          authorizer:
-#            name: fgaJwtAuthorizer
+  api-update-picture:
+    handler: fga_rest_api_handler.update_picture
+    events:
+      - httpApi:
+          path: /api/v001/flickr/picture
+          method: put
+          authorizer:
+            name: fgaJwtAuthorizer
 
  
   api-get-user-info:
