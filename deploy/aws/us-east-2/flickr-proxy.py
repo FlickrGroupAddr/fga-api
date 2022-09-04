@@ -225,10 +225,6 @@ def _attempt_flickr_add( curr_user_request, flickrapi_handle, db_cursor ):
     #logger.debug( "Pic group memberships:" )
     #logger.debug( json.dumps(group_memberships_for_pic, indent=4, sort_keys=True) )
 
-    if SQS_QUEUE_URL is None:
-        logger.error("No SQS queue to publish results to, bailing" )
-        return
-
     # If the user isn't in the requested group, mark a permfail
     if curr_user_request['flickr_group_id'] not in group_memberships_for_user:
 
