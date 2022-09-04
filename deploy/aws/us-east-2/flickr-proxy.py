@@ -7,6 +7,7 @@ import datetime
 import uuid
 import pprint
 import os
+import psycopg2
 
 
 logging_level = logging.DEBUG
@@ -15,12 +16,14 @@ logger = logging.getLogger()
 logger.setLevel(logging_level)
 
 ssm = boto3.client('ssm', region_name='us-east-2' )
-sqs = boto3.client('sqs', region_name='us-east-2' )
 
-SQS_QUEUE_URL = os.getenv( 'SQS_QUEUE_URL' )
 
 
 def _valid_app_request( app_request ):
+    # Make sure it's a list, and that every entry has the proper format
+    if isinstance( app_request, list ) is False:
+        return False
+
     required_keys = (
         "user_submitted_request_id",
         "user_cognito_id",
@@ -28,7 +31,13 @@ def _valid_app_request( app_request ):
         "flickr_group_id"
     )
 
-    return all( key in app_request for key in required_keys )
+    for curr_entry in app_request:
+        if all( key in curr_entry for key in required_keys ) is False:
+            return False
+
+    # We know we're good to go
+    return True
+
 
 
 def _read_event(event):
@@ -94,63 +103,6 @@ def _create_flickr_api_handle( app_flickr_api_key_info, user_flickr_auth_info ):
                                            format='parsed-json')
 
     return flickrapi_handle
-
-
-def _generate_postgres_db_handle( pgsql_creds ):
-    #logger.debug( "Attempting DB connect" )
-    #logger.debug( json.dumps(pgsql_creds, indent=4, sort_keys=True) )
-
-    db_handle = psycopg2.connect(
-        host        = pgsql_creds['db_host'],
-        user        = pgsql_creds['db_user'],
-        password    = pgsql_creds['db_passwd'],
-        database    = pgsql_creds['database_name'] )
-
-    #logger.debug( "Back from DB connect" )
-
-    return db_handle
-
-
-def _can_attempt_request( db_cursor, curr_user_request ):
-
-    # Get most recent row of attempt status for this request -- if any
-    sql_command = """
-        SELECT DATE(attempt_started) AS most_recent_attempt_date, final_status AS most_recent_attempt_status
-        FROM group_add_attempts
-        WHERE submitted_request_fk = %s
-        ORDER BY attempt_started DESC
-        LIMIT 1;
-    """
-
-    sql_parameters = ( curr_user_request['user_submitted_request_id'], )
-    db_cursor.execute( sql_command, sql_parameters )
-    db_row = db_cursor.fetchone()
-    if db_row: 
-        most_recent_attempt_date = db_row[0]
-        most_recent_attempt_status = db_row[1]
-
-        #logger.debug( "Most recent date: " + pprint.pformat(most_recent_attempt_date) )
-        #logger.debug( f"Most recent status: {most_recent_attempt_status}" )
-
-        curr_utc_date = datetime.datetime.now( datetime.timezone.utc ).date()
-
-        # We can attempt as long as:
-        #   - most recent attempt was not within the current UTC day *and*
-        #   - most recent status was not a permstatus 
-        has_permstatus = most_recent_attempt_status.startswith("permstatus_")
-        too_soon = most_recent_attempt_date == curr_utc_date
-        can_attempt = has_permstatus is False and too_soon is False
-        if can_attempt is False:
-            logger.info( f"Cannot attempt request: has_permstatus={has_permstatus}, too_soon={too_soon}, ignoring request" )
-
-    else: 
-        logger.debug( f"User request {curr_user_request['user_submitted_request_id']} has never been tried, can attempt" )
-        # We've never tried it, so sure!
-        can_attempt = True
-
-    logger.debug( f"Result of can attempt on request {curr_user_request['user_submitted_request_id']}: {can_attempt}" ) 
-
-    return can_attempt
 
 
 def _get_group_memberships_for_user( flickrapi_handle ):
@@ -224,7 +176,7 @@ def _perform_group_add( flickrapi_handle, photo_id, group_id ):
     return operation_status
 
 
-def _attempt_flickr_add( curr_user_request, flickrapi_handle ):
+def _attempt_flickr_add( curr_user_request, flickrapi_handle, db_cursor, group_user_throttling_state ):
 
     timestamp_start = datetime.datetime.now( datetime.timezone.utc )
 
@@ -239,10 +191,6 @@ def _attempt_flickr_add( curr_user_request, flickrapi_handle ):
     #logger.debug( json.dumps(group_memberships_for_user, indent=4, sort_keys=True) )
     #logger.debug( "Pic group memberships:" )
     #logger.debug( json.dumps(group_memberships_for_pic, indent=4, sort_keys=True) )
-
-    if SQS_QUEUE_URL is None:
-        logger.error("No SQS queue to publish results to, bailing" )
-        return
 
     # If the user isn't in the requested group, mark a permfail
     if curr_user_request['flickr_group_id'] not in group_memberships_for_user:
@@ -266,48 +214,81 @@ def _attempt_flickr_add( curr_user_request, flickrapi_handle ):
 
         attempt_status = results_of_add_attempt
 
+        # Note throttling so we don't try this (group + user) combo again this run
+        if attempt_status == 'defer_group_throttled_for_user':
+            group_user_throttling_state[ curr_user_request['flickr_group_id'] ] = { 
+                curr_user_request['user_cognito_id']: None 
+            }
+            logger.info( f"Noted that group {curr_user_request['flickr_group_id']} has throttled user " + 
+                curr_user_request['user_cognito_id'] )
+
+
+
     logger.info( f"Final Flickr operation status: {attempt_status}" )
 
     timestamp_end           = datetime.datetime.now( datetime.timezone.utc )
 
-    finished_attempt_msg    = {
-        "user_submitted_request_id"     : curr_user_request['user_submitted_request_id'],
-        "timestamp_attempt_started"     : timestamp_start.isoformat(),
-        "timestamp_attempt_ended"       : timestamp_end.isoformat(),
-        "final_status"                  : attempt_status,
-    }
+    sql_command = """
+        INSERT INTO group_add_attempts ( uuid_pk, submitted_request_fk, attempt_started,
+            attempt_completed, final_status )
+        VALUES ( %s, %s, %s, %s, %s );
+        """
+
+    add_attempt_guid = str( uuid.uuid4() )
+
+    sql_params = (
+        add_attempt_guid,
+        curr_user_request['user_submitted_request_id'],
+        timestamp_start.isoformat(),
+        timestamp_end.isoformat(),
+        attempt_status
+    )
+
+    db_cursor.execute( sql_command, sql_params )
 
 
-    sqs.send_message(
-        QueueUrl        = SQS_QUEUE_URL,
-        MessageBody     = json.dumps(finished_attempt_msg, indent=4, sort_keys=True),
-        MessageGroupId  = curr_user_request['user_submitted_request_id'] )
- 
+
+def _get_db_handle( ):
+    pgsql_creds = _get_postgresql_creds()
+
+    return psycopg2.connect(
+        host        = pgsql_creds['db_host'],
+        user        = pgsql_creds['db_user'],
+        password    = pgsql_creds['db_passwd'],
+        database    = pgsql_creds['database_name'] )
+
+
 
 def _process_app_requests( app_requests ):
     flickr_creds_app = _get_flickr_app_creds()
     logger.debug( "Successfully retrieved Flickr user and app creds from Parameter Store" )
 
+    with _get_db_handle() as db_handle:
+        with db_handle.cursor() as db_cursor:
 
+            group_user_throttling_state = {} 
 
-    for curr_request in app_requests:
-        logger.info( "Processing request:\n" + json.dumps(curr_request, indent=4, sort_keys=True) )
+            for curr_request_batch in app_requests:
+                logger.info( "Processing request batch:\n" + json.dumps(curr_request_batch, indent=4, sort_keys=True) )
 
-        flickr_creds_user = _get_flickr_user_creds( curr_request['user_cognito_id'] )
-        if not flickr_creds_user:
-            logger.warn( f"Could not find flickr creds for Cognito user ID \"{curr_request['user_cognito_id']}\", bailing" )
-            continue
+                for curr_request in curr_request_batch:
 
-        flickrapi_handle = _create_flickr_api_handle( flickr_creds_app, flickr_creds_user )
-        logger.debug( "Successfully created Flickr API handle with app & user creds" )
+                    # if this user has been throttled by the current group, skip them
+                    curr_group  = curr_request[ 'flickr_group_id' ]
+                    curr_user   = curr_request[ 'user_cognito_id' ]
+                    if curr_group in group_user_throttling_state and curr_user in group_user_throttling_state[curr_group]:
+                        logger.info( f"Skipping add attempt for user {curr_user} to group {curr_group}, they are throttled for the day" )
+                        continue
 
-        # Make sure we don't have a permanent status for this request or an attempt in the current UTC day
+                    flickr_creds_user = _get_flickr_user_creds( curr_user )
+                    if not flickr_creds_user:
+                        logger.warn( f"Could not find flickr creds for Cognito user ID \"{curr_user}\", bailing" )
+                        continue
 
-        # Can't actually access Postgres directly anymore, so the periodic poller will need to do this logic
-        #if _can_attempt_request( db_cursor, curr_request ) is False:
-        #    continue
+                    flickrapi_handle = _create_flickr_api_handle( flickr_creds_app, flickr_creds_user )
+                    logger.debug( "Successfully created Flickr API handle with app & user creds" )
 
-        _attempt_flickr_add( curr_request, flickrapi_handle )
+                    _attempt_flickr_add( curr_request, flickrapi_handle, db_cursor, group_user_throttling_state )
 
     logger.debug( "Leaving process app requests" )
 

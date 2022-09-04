@@ -45,23 +45,15 @@ def _get_db_handle( ):
         database    = pgsql_creds['database_name'] )
 
 
-def _do_sns_notify( user_cognito_id, flickr_photo_id, flickr_group_id, request_guid ):
-    logger.debug( "Starting SNS notification due to successful DB insert" )
+def _do_sns_notify( ordered_daily_batch_of_requests ):
 
     # let's see if the attempt to store the ARN of the generated SNS topic by serverless in env var worked
     sns_topic_arn = os.getenv( 'SNS_TOPIC_ARN' )
     if sns_topic_arn:
         logger.debug( f"SNS Topic ARN was found in env vars: {sns_topic_arn}, sending notification" )
         try:
-            sns_notification = {
-                "user_submitted_request_id"     : request_guid,
-                "user_cognito_id"               : user_cognito_id,
-                "flickr_picture_id"             : flickr_photo_id,
-                "flickr_group_id"               : flickr_group_id,
-            }
-
             logger.debug( "SNS notification text" )
-            sns_notification_text = json.dumps( sns_notification, indent=4, sort_keys=True )
+            sns_notification_text = json.dumps( ordered_daily_batch_of_requests, indent=4, sort_keys=True )
             logger.debug( sns_notification_text )
 
             sns.publish(
@@ -69,7 +61,7 @@ def _do_sns_notify( user_cognito_id, flickr_photo_id, flickr_group_id, request_g
                 Message     = sns_notification_text,
             )
 
-            logging.info( "Successfully published notification of new FGA request to SNS" )
+            logging.info( "Successfully published notification of daily retry requests to SNS" )
         except Exception as e:
             if logging_level == logging.DEBUG:
                 raise e
@@ -80,74 +72,50 @@ def _do_sns_notify( user_cognito_id, flickr_photo_id, flickr_group_id, request_g
 
 
 
-def _get_retry_attempts( db_cursor ):
+def _get_ordered_retry_attempts( db_cursor ):
+    # Get list of all requests that DO NOT have a permanent status
+    #   List will be returned in the order we should attempt adds:
+    #       for each group:
+    #           chronological (oldest to newest) pic->group add requests for that user into the current group 
     sql_command = """
-        SELECT          submitted_requests.uuid_pk AS request_guid,
-                        flickr_user_cognito_id,
-                        picture_flickr_id,
-                        flickr_group_id,
-                        attempt_completed,
-                        final_status
+        SELECT          uuid_pk, flickr_user_cognito_id, picture_flickr_id, flickr_group_id
         FROM            submitted_requests
-        LEFT JOIN       group_add_attempts
-        ON              submitted_requests.uuid_pk = group_add_attempts.submitted_request_fk
-        ORDER BY        request_datetime, group_add_attempts.attempt_completed DESC;
+        WHERE           uuid_pk NOT IN ( 
+            SELECT      submitted_request_fk 
+            FROM        group_add_attempts 
+            WHERE       final_status LIKE 'permstatus_%%' 
+        )
+        ORDER BY        flickr_group_id, flickr_user_cognito_id, request_datetime;
     """
-
     db_cursor.execute( sql_command )
 
-    last_request_guid = None
-
-    curr_utc_date = current_timestamp = datetime.datetime.now(
-        datetime.timezone.utc).replace(microsecond=0).date()
-
-    retry_attempts = []
-
+    attempt_list = []
     for curr_result_row in db_cursor.fetchall():
-        curr_request_guid = curr_result_row[0]
-        if curr_request_guid != last_request_guid:
-            # Have new request guid.  First row is newest attempt. Make sure it was not
-            #   the current UTC day
-            if curr_result_row[4] is not None:
-                most_recent_attempt_date = curr_result_row[4].date()
+        full_request_entry = {
+            "user_cognito_id"               : curr_result_row[1],
+            "flickr_picture_id"             : curr_result_row[2],
+            "flickr_group_id"               : curr_result_row[3],
+            "user_submitted_request_id"     : curr_result_row[0],
+        }
 
-                if most_recent_attempt_date != curr_utc_date:
-                    # Find out if most recent status was permanent
-                    most_recent_status = curr_result_row[5]
-                    if most_recent_status is not None and most_recent_status.startswith("permstatus_") is False:
-                        #print( "Need to retry this row: " + json.dumps(curr_result_row, default=str) )
-                        new_retry_attempt = {
-                            "user_cognito_id"       : curr_result_row[1],
-                            "flickr_photo_id"       : curr_result_row[2],
-                            "flickr_group_id"       : curr_result_row[3],
-                            "request_guid"          : curr_result_row[0],
-                        }
+        attempt_list.append( full_request_entry )
 
-                        retry_attempts.append( new_retry_attempt )
-
-        last_request_guid = curr_request_guid
-
-    return retry_attempts
+    # We don't need to do any filtering on date; this daily script is run a few seconds after each new UTC day ticks over, 
+    #   so all these are valid requests with a chance of succeeding
+    return attempt_list
 
 
 def daily_retry(event, context):
     try:
         with _get_db_handle() as db_handle:
             with db_handle.cursor() as db_cursor:
-                requests_to_retry = _get_retry_attempts( db_cursor )
+                ordered_requests_to_retry = _get_ordered_retry_attempts( db_cursor )
 
-        # Attempt the daily retries
-        for curr_retry in requests_to_retry:
-            logger.info( "Retrying:\n" + json.dumps(
-                curr_retry, sort_keys=True, indent=4, default=str) )
-
-            _do_sns_notify(
-                curr_retry['user_cognito_id'],
-                curr_retry['flickr_photo_id'],
-                curr_retry['flickr_group_id'],
-                curr_retry['request_guid'] )
-
-
+                # If there are any request to retry, send the batch of entries for this daily run in one message
+                if len( ordered_requests_to_retry ) > 0:
+                    _do_sns_notify( ordered_requests_to_retry )
+                else:
+                    logger.info( "All requests have been added, nothing to retry" )
 
     except Exception as e:
         if logging_level == logging.DEBUG:

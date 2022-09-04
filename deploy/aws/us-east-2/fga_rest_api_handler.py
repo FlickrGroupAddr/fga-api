@@ -116,12 +116,17 @@ def _do_sns_notify( user_cognito_id, flickr_photo_id, flickr_group_id, request_g
     if sns_topic_arn:
         logger.debug( f"SNS Topic ARN was found in env vars: {sns_topic_arn}, sending notification" )
         try:
-            sns_notification = {
-  	            "user_submitted_request_id"     : request_guid,
-	            "user_cognito_id"               : user_cognito_id,
-	            "flickr_picture_id"             : flickr_photo_id,
-	            "flickr_group_id"               : flickr_group_id,
-            }
+            # Even though it only has one entry, push this as a list. We do this because the daily list of retries
+            #       comes in as an atomic list that needs to be attempted in order. We can send ours as a list, it's
+            #       just a list with a single item
+            sns_notification = [ 
+                {
+  	                "user_submitted_request_id"     : request_guid,
+	                "user_cognito_id"               : user_cognito_id,
+	                "flickr_picture_id"             : flickr_photo_id,
+	                "flickr_group_id"               : flickr_group_id,
+                }
+            ]
 
             logger.debug( "SNS notification text" )
             sns_notification_text = json.dumps( sns_notification, indent=4, sort_keys=True )
@@ -362,7 +367,7 @@ def put_flickr_id( event, context ):
 
         if permissions_granted_callback_url is None:
             logger.warn("Having to manual overwrite callback but I'm bored" )
-            permissions_granted_callback_url = "https://x4etaszxrl.execute-api.us-east-2.amazonaws.com/api/v001/flickr/user-permission-granted-callback"
+            permissions_granted_callback_url = "https://ue0ny85hec.execute-api.us-east-2.amazonaws.com/api/v001/flickr/user-permission-granted-callback"
 
         flickr.get_request_token(oauth_callback=permissions_granted_callback_url)
 
