@@ -97,43 +97,70 @@ def _create_flickr_api_handle( app_flickr_api_key_info, user_flickr_auth_info ):
 
 
 def _can_attempt_request( db_cursor, curr_user_request ):
+    # Incoming format of user request
+    #   {
+    #       "flickr_group_id"           : "416556@N22",
+    #       "flickr_picture_id"         : "52190190117",
+    #       "user_cognito_id"           : "aa0625e0-ac80-4336-9a96-7888187ed69d",
+    #       "user_submitted_request_id" : "8cef87f8-1323-4b9e-ac08-76401e338213"
+    #   }
 
-    # Get most recent row of attempt status for this request -- if any
+    # If we have permstatus in the most recent attempt for THIS request, we can bail early
+    #
+    #   NOTE: any percent signs used for SQL wildcard matching must be escaped with %% per
+    #       per psycopg2 documentation
     sql_command = """
-        SELECT DATE(attempt_started) AS most_recent_attempt_date, final_status AS most_recent_attempt_status
-        FROM group_add_attempts
-        WHERE submitted_request_fk = %s
-        ORDER BY attempt_started DESC
-        LIMIT 1;
+        SELECT      *
+        FROM        group_add_attempts
+        WHERE       submitted_request_fk    = %s
+            AND     final_status            LIKE 'permstatus_%%'
+        LIMIT       1;
     """
-
     sql_parameters = ( curr_user_request['user_submitted_request_id'], )
     db_cursor.execute( sql_command, sql_parameters )
     db_row = db_cursor.fetchone()
-    if db_row: 
-        most_recent_attempt_date = db_row[0]
-        most_recent_attempt_status = db_row[1]
 
-        #logger.debug( "Most recent date: " + pprint.pformat(most_recent_attempt_date) )
-        #logger.debug( f"Most recent status: {most_recent_attempt_status}" )
+    can_attempt = True
 
+    if db_row:
+        can_attempt = False
+        logger.info( f"Request {curr_user_request['user_submitted_request_id']} has permanent status, cannot re-attempt" )
+    else:
+        logger.debug( f"Request {curr_user_request['user_submitted_request_id']} does NOT have permanent status, eligible for consideration" )
+
+        # Get status for all attempts for pictures from this user & group in the last UTC
+        # day. 
+        #
+        # If *any* attempts in today's UTC day for this user/group combo do NOT have permanent
+        # status, that means the user has been throttled for the day. If they're already 
+        # throttled, bail out
         curr_utc_date = datetime.datetime.now( datetime.timezone.utc ).date()
 
-        # We can attempt as long as:
-        #   - most recent attempt was not within the current UTC day *and*
-        #   - most recent status was not a permstatus 
-        has_permstatus = most_recent_attempt_status.startswith("permstatus_")
-        too_soon = most_recent_attempt_date == curr_utc_date
-        can_attempt = has_permstatus is False and too_soon is False
-        if can_attempt is False:
-            logger.info( f"Cannot attempt request: has_permstatus={has_permstatus}, too_soon={too_soon}, ignoring request" )
+        sql_command = """
+            SELECT      *
+            FROM        submitted_requests
+            JOIN        group_add_attempts 
+                ON      submitted_requests.uuid_pk = group_add_attempts.submitted_request_fk
+                AND     DATE(attempt_completed) = %s
+                AND     flickr_user_cognito_id  = %s
+                AND     flickr_group_id         = %s
+                AND     final_status            NOT LIKE 'permstatus_%%';
+        """
 
-    else: 
-        logger.debug( f"User request {curr_user_request['user_submitted_request_id']} has never been tried, can attempt" )
-        # We've never tried it, so sure!
-        can_attempt = True
+        sql_parameters = ( 
+            curr_utc_date,          
+            curr_user_request['user_cognito_id'],
+            curr_user_request['flickr_group_id'],
+        )
 
-    logger.debug( f"Result of can attempt on request {curr_user_request['user_submitted_request_id']}: {can_attempt}" ) 
+        db_cursor.execute( sql_command, sql_parameters )
+        db_row = db_cursor.fetchone()
+
+        if db_row:
+            can_attempt = False
+            logger.info( f"Request {curr_user_request['user_submitted_request_id']} is being deferred, as that user has been throttled for this group for this UTC day" )
+        else:
+            logger.info( "User is not throttled by this picture's group, marking to attempt now" )
 
     return can_attempt
 
