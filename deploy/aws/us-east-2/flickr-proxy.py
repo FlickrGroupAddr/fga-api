@@ -7,6 +7,7 @@ import datetime
 import uuid
 import pprint
 import os
+import psycopg2
 
 
 logging_level = logging.DEBUG
@@ -15,9 +16,7 @@ logger = logging.getLogger()
 logger.setLevel(logging_level)
 
 ssm = boto3.client('ssm', region_name='us-east-2' )
-sqs = boto3.client('sqs', region_name='us-east-2' )
 
-SQS_QUEUE_URL = os.getenv( 'SQS_QUEUE_URL' )
 
 
 def _valid_app_request( app_request ):
@@ -95,20 +94,6 @@ def _create_flickr_api_handle( app_flickr_api_key_info, user_flickr_auth_info ):
 
     return flickrapi_handle
 
-
-def _generate_postgres_db_handle( pgsql_creds ):
-    #logger.debug( "Attempting DB connect" )
-    #logger.debug( json.dumps(pgsql_creds, indent=4, sort_keys=True) )
-
-    db_handle = psycopg2.connect(
-        host        = pgsql_creds['db_host'],
-        user        = pgsql_creds['db_user'],
-        password    = pgsql_creds['db_passwd'],
-        database    = pgsql_creds['database_name'] )
-
-    #logger.debug( "Back from DB connect" )
-
-    return db_handle
 
 
 def _can_attempt_request( db_cursor, curr_user_request ):
@@ -224,7 +209,7 @@ def _perform_group_add( flickrapi_handle, photo_id, group_id ):
     return operation_status
 
 
-def _attempt_flickr_add( curr_user_request, flickrapi_handle ):
+def _attempt_flickr_add( curr_user_request, flickrapi_handle, db_cursor ):
 
     timestamp_start = datetime.datetime.now( datetime.timezone.utc )
 
@@ -270,44 +255,61 @@ def _attempt_flickr_add( curr_user_request, flickrapi_handle ):
 
     timestamp_end           = datetime.datetime.now( datetime.timezone.utc )
 
-    finished_attempt_msg    = {
-        "user_submitted_request_id"     : curr_user_request['user_submitted_request_id'],
-        "timestamp_attempt_started"     : timestamp_start.isoformat(),
-        "timestamp_attempt_ended"       : timestamp_end.isoformat(),
-        "final_status"                  : attempt_status,
-    }
+    sql_command = """
+        INSERT INTO group_add_attempts ( uuid_pk, submitted_request_fk, attempt_started,
+            attempt_completed, final_status )
+        VALUES ( %s, %s, %s, %s, %s );
+        """
+
+    add_attempt_guid = str( uuid.uuid4() )
+
+    sql_params = (
+        add_attempt_guid,
+        curr_user_request['user_submitted_request_id'],
+        timestamp_start.isoformat(),
+        timestamp_end.isoformat(),
+        attempt_status
+    )
+
+    db_cursor.execute( sql_command, sql_params )
 
 
-    sqs.send_message(
-        QueueUrl        = SQS_QUEUE_URL,
-        MessageBody     = json.dumps(finished_attempt_msg, indent=4, sort_keys=True),
-        MessageGroupId  = curr_user_request['user_submitted_request_id'] )
- 
+
+def _get_db_handle( ):
+    pgsql_creds = _get_postgresql_creds()
+
+    return psycopg2.connect(
+        host        = pgsql_creds['db_host'],
+        user        = pgsql_creds['db_user'],
+        password    = pgsql_creds['db_passwd'],
+        database    = pgsql_creds['database_name'] )
+
+
 
 def _process_app_requests( app_requests ):
     flickr_creds_app = _get_flickr_app_creds()
     logger.debug( "Successfully retrieved Flickr user and app creds from Parameter Store" )
 
+    with _get_db_handle() as db_handle:
+        with db_handle.cursor() as db_cursor:
 
+            for curr_request in app_requests:
+                logger.info( "Processing request:\n" + json.dumps(curr_request, indent=4, sort_keys=True) )
 
-    for curr_request in app_requests:
-        logger.info( "Processing request:\n" + json.dumps(curr_request, indent=4, sort_keys=True) )
+                flickr_creds_user = _get_flickr_user_creds( curr_request['user_cognito_id'] )
+                if not flickr_creds_user:
+                    logger.warn( f"Could not find flickr creds for Cognito user ID \"{curr_request['user_cognito_id']}\", bailing" )
+                    continue
 
-        flickr_creds_user = _get_flickr_user_creds( curr_request['user_cognito_id'] )
-        if not flickr_creds_user:
-            logger.warn( f"Could not find flickr creds for Cognito user ID \"{curr_request['user_cognito_id']}\", bailing" )
-            continue
+                flickrapi_handle = _create_flickr_api_handle( flickr_creds_app, flickr_creds_user )
+                logger.debug( "Successfully created Flickr API handle with app & user creds" )
 
-        flickrapi_handle = _create_flickr_api_handle( flickr_creds_app, flickr_creds_user )
-        logger.debug( "Successfully created Flickr API handle with app & user creds" )
+                # Make sure we don't have a permanent status for this request or an attempt in the current UTC day
 
-        # Make sure we don't have a permanent status for this request or an attempt in the current UTC day
+                if _can_attempt_request( db_cursor, curr_request ) is False:
+                    continue
 
-        # Can't actually access Postgres directly anymore, so the periodic poller will need to do this logic
-        #if _can_attempt_request( db_cursor, curr_request ) is False:
-        #    continue
-
-        _attempt_flickr_add( curr_request, flickrapi_handle )
+                _attempt_flickr_add( curr_request, flickrapi_handle, db_cursor )
 
     logger.debug( "Leaving process app requests" )
 

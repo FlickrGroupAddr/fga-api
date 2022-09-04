@@ -92,14 +92,14 @@ functions:
           authorizer:
             name: fgaJwtAuthorizer
 
-#  api-get-picture-info:
-#    handler: fga_rest_api_handler.get_flickr_picture_info
-#    events:
-#      - httpApi:
-#          path: /api/v001/flickr/picture
-#          method: get
-#          authorizer:
-#            name: fgaJwtAuthorizer
+  api-get-picture-info:
+    handler: fga_rest_api_handler.get_flickr_picture_info
+    events:
+      - httpApi:
+          path: /api/v001/flickr/picture
+          method: get
+          authorizer:
+            name: fgaJwtAuthorizer
 
 #  api-update-picture:
 #    handler: fga_rest_api_handler.update_picture
@@ -111,14 +111,14 @@ functions:
 #            name: fgaJwtAuthorizer
 
  
-#  api-get-user-info:
-#    handler: fga_rest_api_handler.get_flickr_user_info
-#    events:
-#      - httpApi:
-#          path: /api/v001/flickr/user
-#          method: get
-#          authorizer:
-#            name: fgaJwtAuthorizer
+  api-get-user-info:
+    handler: fga_rest_api_handler.get_flickr_user_info
+    events:
+      - httpApi:
+          path: /api/v001/flickr/user
+          method: get
+          authorizer:
+            name: fgaJwtAuthorizer
 
   api-get-user-requests:
     handler: fga_rest_api_handler.get_user_outstanding_requests
