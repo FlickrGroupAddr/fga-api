@@ -137,7 +137,7 @@ def _do_sns_notify( user_cognito_id, flickr_photo_id, flickr_group_id, request_g
                 Message     = sns_notification_text,
             )
 
-            logging.info( "Successfully published notification of new FGA request to SNS" )
+            logger.info( "Successfully published notification of new FGA request to SNS" )
         except Exception as e:
             if logging_level == logging.DEBUG:
                 raise e
@@ -205,7 +205,7 @@ def _do_db_group_add( photo_id, group_id ):
                             }  
                         )
 
-                        logging.info( f"Successful request, added to DB, assigned GUID {str(add_attempt_guid)}" )
+                        logger.info( f"Successful request, added to DB, assigned GUID {str(add_attempt_guid)}" )
 
                     else:
                         response =  _create_apigw_http_response( 500, 
@@ -214,7 +214,7 @@ def _do_db_group_add( photo_id, group_id ):
                             }
                         )
                 except psycopg2.Error as e:
-                    logging.warn( f"Operation failed, DB exception thrown: {str(e)}" )
+                    logger.warn( f"Operation failed, DB exception thrown: {str(e)}" )
                     response = _create_apigw_http_response( 
                         500,
                         {
@@ -665,13 +665,13 @@ def _do_group_add( event ):
 
                     response = _create_apigw_http_response( 204, None )
 
-                    logging.info( f"Successful request, added to DB, assigned GUID {add_attempt_guid}" )
+                    logger.info( f"Successful request, added to DB, assigned GUID {add_attempt_guid}" )
 
                     # If we didn't throw an exception on DB add, try SNS
                     # notification
                     _do_sns_notify( user_cognito_id, photo_id, group_id, add_attempt_guid )
                 except psycopg2.Error as e:
-                    logging.warn( f"Operation failed, DB exception thrown: {str(e)}" )
+                    logger.warn( f"Operation failed, DB exception thrown: {str(e)}" )
                     response = _create_apigw_http_response(
                         500,
                         {

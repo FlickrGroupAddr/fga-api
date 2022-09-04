@@ -122,7 +122,7 @@ def _get_group_memberships_for_user( flickrapi_handle ):
         if logging_level == logging.DEBUG:
             raise e
         else:
-            logging.warn( f"Exception thrown when getting group memberships for user: {str(e)}" )
+            logger.warn( f"Exception thrown when getting group memberships for user: {str(e)}" )
 
     return return_groups
 
@@ -143,7 +143,7 @@ def _get_group_memberships_for_pic( flickrapi_handle, pic_id ):
         if logging_level == logging.DEBUG:
             raise e
         else:
-            logging.warn( f"Exception thrown when trying to get Flickr groups for pic {pic_id}: {str(e)}" )
+            logger.warn( f"Exception thrown when trying to get Flickr groups for pic {pic_id}: {str(e)}" )
 
     return group_memberships
 

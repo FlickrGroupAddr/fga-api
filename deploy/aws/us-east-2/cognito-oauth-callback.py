@@ -49,15 +49,15 @@ def cognito_oauth_callback_webui_dev(event, context):
 
         ssm_params = _get_ssm_oauth_parameters( 'webui_dev' )
 
-        logging.debug("SSM Params")
-        logging.debug( json.dumps(ssm_params, indent=4, sort_keys=True) )
+        logger.debug("SSM Params")
+        logger.debug( json.dumps(ssm_params, indent=4, sort_keys=True) )
 
         #logger.debug( "Before calling exchange auth code" )
         cognito_response = _exchange_auth_code_for_bearer_token( auth_code, ssm_params )
         #logger.debug( "Back from exchange" )
 
-        logging.debug( "Cognito response:" )
-        logging.debug( json.dumps( cognito_response, indent=4, sort_keys=True) )
+        logger.debug( "Cognito response:" )
+        logger.debug( json.dumps( cognito_response, indent=4, sort_keys=True) )
 
         session_state = {
             "cognito_session_data": {
@@ -72,8 +72,8 @@ def cognito_oauth_callback_webui_dev(event, context):
             }
         }
 
-        logging.debug( "Session state" )
-        logging.debug( json.dumps( session_state, indent=4, sort_keys=True) )
+        logger.debug( "Session state" )
+        logger.debug( json.dumps( session_state, indent=4, sort_keys=True) )
 
         # Get the user's GUID from the decoded token info
         user_cognito_id = session_state['cognito_session_data']['decoded_tokens']['id_token']['claims']['sub']

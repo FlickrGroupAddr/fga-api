@@ -61,7 +61,7 @@ def _do_sns_notify( ordered_daily_batch_of_requests ):
                 Message     = sns_notification_text,
             )
 
-            logging.info( "Successfully published notification of daily retry requests to SNS" )
+            logger.info( "Successfully published notification of daily retry requests to SNS" )
         except Exception as e:
             if logging_level == logging.DEBUG:
                 raise e
