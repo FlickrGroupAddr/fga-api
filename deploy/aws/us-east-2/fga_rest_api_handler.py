@@ -116,12 +116,17 @@ def _do_sns_notify( user_cognito_id, flickr_photo_id, flickr_group_id, request_g
     if sns_topic_arn:
         logger.debug( f"SNS Topic ARN was found in env vars: {sns_topic_arn}, sending notification" )
         try:
-            sns_notification = {
-  	            "user_submitted_request_id"     : request_guid,
-	            "user_cognito_id"               : user_cognito_id,
-	            "flickr_picture_id"             : flickr_photo_id,
-	            "flickr_group_id"               : flickr_group_id,
-            }
+            # Even though it only has one entry, push this as a list. We do this because the daily list of retries
+            #       comes in as an atomic list that needs to be attempted in order. We can send ours as a list, it's
+            #       just a list with a single item
+            sns_notification = [ 
+                {
+  	                "user_submitted_request_id"     : request_guid,
+	                "user_cognito_id"               : user_cognito_id,
+	                "flickr_picture_id"             : flickr_photo_id,
+	                "flickr_group_id"               : flickr_group_id,
+                }
+            ]
 
             logger.debug( "SNS notification text" )
             sns_notification_text = json.dumps( sns_notification, indent=4, sort_keys=True )
