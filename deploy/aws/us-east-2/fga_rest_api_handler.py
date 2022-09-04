@@ -362,7 +362,7 @@ def put_flickr_id( event, context ):
 
         if permissions_granted_callback_url is None:
             logger.warn("Having to manual overwrite callback but I'm bored" )
-            permissions_granted_callback_url = "https://x4etaszxrl.execute-api.us-east-2.amazonaws.com/api/v001/flickr/user-permission-granted-callback"
+            permissions_granted_callback_url = "https://ue0ny85hec.execute-api.us-east-2.amazonaws.com/api/v001/flickr/user-permission-granted-callback"
 
         flickr.get_request_token(oauth_callback=permissions_granted_callback_url)
 

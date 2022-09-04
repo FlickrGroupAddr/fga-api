@@ -13,20 +13,14 @@ provider:
   # Note, we did testing for mem: https://docs.google.com/spreadsheets/d/1QjMKvrFh_-B4ROGMZFGfRTCLOvASis9w0LmgCRx_DOE
   memorySize: 256       
 
-  # RDS is private inside the VPC, so we need to put the Lambdas that talk to it inside that same place
-  vpc:
-    securityGroupIds:
-      - sg-02b9233a738009aad
-    subnetIds:
-      - subnet-077282b17b490bf96 
-      - subnet-0cc3044b10111fd42
-
   environment:
     PGSQL_DB_INFO_SSM_PATH: "/flickrgroupaddr/resources/pgsql/creds"
     SNS_TOPIC_ARN: !Ref fgaAttemptAddTopic
   iam:
     role:
       statements:
+
+        # Need to be able to read and write to Param Store -- store per-user Flickr OAuth token in Param Store
         - Effect: "Allow"
           Action:
             - "ssm:GetParameter"
@@ -38,6 +32,7 @@ provider:
           Action:
             - "SNS:Publish"
           Resource: !Ref fgaAttemptAddTopic
+
         - Effect: "Allow"
           Action:
             - "dynamodb:PutItem"
@@ -59,31 +54,28 @@ provider:
 
 
 functions:
-  api-new-request:
-    handler: fga_rest_api_handler.create_new_fga_request
-    events:
-      - httpApi:
-          path: /api/v001/fga_request
-          method: post
+#  api-new-request:
+#    handler: fga_rest_api_handler.create_new_fga_request
+#    events:
+#      - httpApi:
+#          path: /api/v001/fga_request
+#          method: post
 
-  flickr-attempt-add:
-    handler: flickr-proxy.attempt_flickr_group_add
-    vpc: ~              # Tilde means null -- this function cannot be in the VPC, it needs to talk to flickr
-    environment:
-      SQS_QUEUE_URL: ${construct:add-attempt-queue.queueUrl}
-    events:
-      - sns:
-          arn: !Ref fgaAttemptAddTopic
-          topicName: AttemptFlickrGroupAdd
+#  flickr-attempt-add:
+#    handler: flickr-proxy.attempt_flickr_group_add
+#    environment:
+#    events:
+#      - sns:
+#          arn: !Ref fgaAttemptAddTopic
+#          topicName: AttemptFlickrGroupAdd
 
-  daily-retry:
-    handler: daily-retry.daily_retry
-    events:
-      - schedule: cron(1 0 * * ? *)
+#  daily-retry:
+#    handler: daily-retry.daily_retry
+#    events:
+#      - schedule: cron(1 0 * * ? *)
 
   api-get-flickr-id:
     handler: fga_rest_api_handler.get_flickr_id
-    vpc: ~
     events:
       - httpApi:
           path: /api/v001/flickr_id
@@ -93,7 +85,6 @@ functions:
 
   api-put-flickr-id:
     handler: fga_rest_api_handler.put_flickr_id
-    vpc: ~
     events:
       - httpApi:
           path: /api/v001/flickr_id
@@ -101,49 +92,46 @@ functions:
           authorizer:
             name: fgaJwtAuthorizer
 
-  api-get-picture-info:
-    handler: fga_rest_api_handler.get_flickr_picture_info
-    vpc: ~
-    events:
-      - httpApi:
-          path: /api/v001/flickr/picture
-          method: get
-          authorizer:
-            name: fgaJwtAuthorizer
+#  api-get-picture-info:
+#    handler: fga_rest_api_handler.get_flickr_picture_info
+#    events:
+#      - httpApi:
+#          path: /api/v001/flickr/picture
+#          method: get
+#          authorizer:
+#            name: fgaJwtAuthorizer
 
-  api-update-picture:
-    handler: fga_rest_api_handler.update_picture
-    events:
-      - httpApi:
-          path: /api/v001/flickr/picture
-          method: put
-          authorizer:
-            name: fgaJwtAuthorizer
+#  api-update-picture:
+#    handler: fga_rest_api_handler.update_picture
+#    events:
+#      - httpApi:
+#          path: /api/v001/flickr/picture
+#          method: put
+#          authorizer:
+#            name: fgaJwtAuthorizer
 
  
-  api-get-user-info:
-    handler: fga_rest_api_handler.get_flickr_user_info
-    vpc: ~
-    events:
-      - httpApi:
-          path: /api/v001/flickr/user
-          method: get
-          authorizer:
-            name: fgaJwtAuthorizer
+#  api-get-user-info:
+#    handler: fga_rest_api_handler.get_flickr_user_info
+#    events:
+#      - httpApi:
+#          path: /api/v001/flickr/user
+#          method: get
+#          authorizer:
+#            name: fgaJwtAuthorizer
 
-  api-get-user-requests:
-    handler: fga_rest_api_handler.get_user_outstanding_requests
-    events:
-      - httpApi:
-          path: /api/v001/flickr/user/requests
-          method: get
-          authorizer:
-            name: fgaJwtAuthorizer
+#  api-get-user-requests:
+#    handler: fga_rest_api_handler.get_user_outstanding_requests
+#    events:
+#      - httpApi:
+#          path: /api/v001/flickr/user/requests
+#          method: get
+#          authorizer:
+#            name: fgaJwtAuthorizer
 
 
   oauth-callback:
     handler: cognito-oauth-callback.cognito_oauth_callback_webui_dev
-    vpc: ~
     events:
       - httpApi:
           path: /oauth/callback
@@ -151,32 +139,20 @@ functions:
 
   user-perms-callback:
     handler: fga_rest_api_handler.user_permission_granted_callback
-    vpc: ~
     events:
       - httpApi:
           path: /api/v001/flickr/user-permission-granted-callback
           method: get
 
-resources: 
+resources:
   Resources:
     fgaAttemptAddTopic:
       Type: AWS::SNS::Topic
       Properties:
-        TopicName: AttemptFlickrGroupAdd    
-    # Should have made DynamoDB a resource?
+        TopicName: AttemptFlickrGroupAdd
 
-constructs:
-  add-attempt-queue:
-    type: queue
-    fifo: true
-    maxRetries: 1
-    worker:
-      handler: db-updater.update_group_add_attempt
-      
-	
 plugins:
   - serverless-python-requirements
-  - serverless-lift
 
 custom:
   pythonRequirements:
