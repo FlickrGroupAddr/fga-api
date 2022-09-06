@@ -89,19 +89,43 @@ def _get_ordered_retry_attempts( db_cursor ):
     """
     db_cursor.execute( sql_command )
 
-    attempt_list = []
+    # Store in a list under a two-level dictionary: group -> user -> chronological list of queries for that group, oldest to newest
+    attempt_dict = {}
     for curr_result_row in db_cursor.fetchall():
+        user_cognito_id             = curr_result_row[1]
+        flickr_picture_id           = curr_result_row[2]
+        flickr_group_id             = curr_result_row[3]
+        user_submitted_request_id   = curr_result_row[0]
+
         full_request_entry = {
-            "user_cognito_id"               : curr_result_row[1],
-            "flickr_picture_id"             : curr_result_row[2],
-            "flickr_group_id"               : curr_result_row[3],
-            "user_submitted_request_id"     : curr_result_row[0],
+            "user_cognito_id"               : user_cognito_id,
+            "flickr_picture_id"             : flickr_picture_id,
+            "flickr_group_id"               : flickr_group_id,
+            "user_submitted_request_id"     : user_submitted_request_id,
         }
 
-        attempt_list.append( full_request_entry )
+        # First time we've hit this group
+        if flickr_group_id not in attempt_dict:
+            attempt_dict[ flickr_group_id ] = {}
+
+        # First time we've hit this user ID for the given group
+        if user_cognito_id not in attempt_dict[ flickr_group_id ]:
+            attempt_dict[ flickr_group_id ][ user_cognito_id ] = []
+
+        # Append this entry onto the end of the list, which will honor the chronological ordering of the requests for given group/user combo
+        attempt_dict[ flickr_group_id ][ user_cognito_id ].append( full_request_entry )
 
     # We don't need to do any filtering on date; this daily script is run a few seconds after each new UTC day ticks over, 
     #   so all these are valid requests with a chance of succeeding
+
+    # Now copy all the group -> user lists into one list. The only ordering that matters is the lowest level list, so it's fine
+    #   to lose all ordering beyond that
+    attempt_list = [ ]
+    for curr_group in attempt_dict:
+        for curr_user in attempt_dict[ curr_group ]:
+            attempt_list.append( attempt_dict[ curr_group ][ curr_user ] )
+            logger.info( f"Added chronological list of open requests for group {curr_group}, user ID {curr_user}, {len(attempt_dict[ curr_group ][ curr_user ])} entries in list" )
+
     return attempt_list
 
 
@@ -111,11 +135,19 @@ def daily_retry(event, context):
             with db_handle.cursor() as db_cursor:
                 ordered_requests_to_retry = _get_ordered_retry_attempts( db_cursor )
 
-                # If there are any request to retry, send the batch of entries for this daily run in one message
                 if len( ordered_requests_to_retry ) > 0:
-                    _do_sns_notify( ordered_requests_to_retry )
+                    total_sns_messages_sent = 0
+                    total_retry_count = 0
+
+                    # Send the batch of entries for this (group + user) combo in one message
+                    for curr_usergroup_list in ordered_requests_to_retry: 
+                        total_retry_count += len( curr_usergroup_list )
+                        _do_sns_notify( curr_usergroup_list )
+                        total_sns_messages_sent += 1
+
+                    logger.info( f"All {total_sns_messages_sent} (group + user) retry lists have been sent to Flickr Proxy, total requests sent: {total_retry_count}" )
                 else:
-                    logger.info( "All requests have been added, nothing to retry" )
+                    logger.info( "All requests have been added, nothing to retry today!" )
 
     except Exception as e:
         if logging_level == logging.DEBUG:

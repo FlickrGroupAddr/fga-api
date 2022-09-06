@@ -63,7 +63,8 @@ functions:
 
   flickr-attempt-add:
     handler: flickr-proxy.attempt_flickr_group_add
-    environment:
+    # Crankecd timeout to 120 seconds. This function can now receive batches of requests in the SNS messages, and it's single threaded. 
+    timeout: 120
     events:
       - sns:
           arn: !Ref fgaAttemptAddTopic
