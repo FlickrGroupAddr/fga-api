@@ -842,7 +842,6 @@ def get_user_outstanding_requests( event, context ):
                             picture_flickr_id,
                             flickr_group_id,
                             request_datetime,
-                            attempt_completed,
                             final_status
                 FROM        submitted_requests
                 LEFT JOIN   group_add_attempts
@@ -854,31 +853,54 @@ def get_user_outstanding_requests( event, context ):
             """
 
             sql_params = ( cognito_user_id, )
-
+   
             db_cursor.execute( sql_command, sql_params )
 
             retrieved_requests = []
+            number_of_attempts = {}
 
             curr_pk = None
 
+            skipping_pk = False
             for curr_row in db_cursor.fetchall():
                 row_pk = curr_row[0]
                 
                 if row_pk != curr_pk:
                     logger.debug( f"Found new PK: {row_pk}" )
 
-                    row_data = {
-                        "pk"                            : row_pk,
-                        "photo_id"                      : curr_row[1],
-                        "group_id"                      : curr_row[2],
-                        "original_request_timestamp"    : curr_row[3],
-                        "most_recent_attempt"           : curr_row[4],
-                        "most_recent_attempt_status"    : curr_row[5],
-                    }
-
-                    retrieved_requests.append( row_data )
+                    if curr_pk is not None and skipping_pk is False:
+                        # Update number of attempts on previous pk
+                        retrieved_requests[-1][ 'number_of_attempts' ] = \
+                            number_of_attempts[ curr_pk ]
 
                     curr_pk = row_pk
+
+                    # Make sure that most recent entry isn't a permstatus_ entry,
+                    #   Otherwise, skip this entry
+                    if curr_row[4] is None or curr_row[4].startswith( "permstatus_" ) is False:
+                        skipping_pk = False
+                        
+                        row_data = {
+                            "pk"                            : row_pk,
+                            "photo_id"                      : curr_row[1],
+                            "group_id"                      : curr_row[2],
+                            "original_request_timestamp"    : curr_row[3],
+                        }
+
+                        retrieved_requests.append( row_data )
+
+                        if curr_row[4] is not None:
+                            number_of_attempts[ curr_pk ] = 1
+                        else:
+                            number_of_attempts[ curr_pk ] = 0
+                    else: 
+                        skipping_pk = True
+                else:
+                    if skipping_pk is False:
+                        number_of_attempts[ curr_pk ] += 1
+
+    # Reverse the list to sort from oldest to newest. Note it's an in-place reverse
+    retrieved_requests.reverse()
 
     response = _create_apigw_http_response( 200, 
         {
